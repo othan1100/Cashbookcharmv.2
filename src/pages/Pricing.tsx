@@ -202,17 +202,6 @@ export default function Pricing() {
               <div className="mt-6 space-y-2">
                 {isCurrent ? (
                   <Button disabled className="w-full rounded-xl">{t("currentPlan")}</Button>
-                ) : currentPlan === "pro" && p.id === "team" ? (
-                  waLink ? (
-                    <a href={waLink} target="_blank" rel="noopener noreferrer"
-                       className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90">
-                      <MessageCircle className="h-4 w-4" /> Contact sales on WhatsApp
-                    </a>
-                  ) : (
-                    <Button disabled className="w-full rounded-xl gap-2">
-                      <MessageCircle className="h-4 w-4" /> Contact sales
-                    </Button>
-                  )
                 ) : (
                   <Button onClick={() => navigate(`/checkout?plan=${p.id}&cycle=${yearly ? "yearly" : "monthly"}`)} className="w-full rounded-xl">
                     {t("upgrade")} — Pay with mobile wallet
