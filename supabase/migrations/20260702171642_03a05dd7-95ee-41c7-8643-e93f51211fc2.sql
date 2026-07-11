@@ -1,0 +1,1 @@
+UPDATE public.profiles SET trial_ends_at = COALESCE(created_at, now()) + interval '14 days', trial_plan = 'pro' WHERE plan_type = 'starter' AND trial_ends_at IS NULL;

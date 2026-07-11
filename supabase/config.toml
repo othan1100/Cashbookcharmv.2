@@ -1,0 +1,10 @@
+project_id = "bnqdyegcqbwezggavmvt"
+
+[functions.send-email]
+verify_jwt = true
+
+[functions.whop-webhook]
+verify_jwt = false
+
+[functions.sifalo-webhook]
+verify_jwt = false

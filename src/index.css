@@ -1,0 +1,159 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CashBook Design System — Light theme with blue primary. All colors HSL. */
+
+@layer base {
+  :root {
+    /* Surfaces */
+    --background: 220 20% 97%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Brand: blue */
+    --primary: 224 76% 48%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 16% 93%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 220 16% 95%;
+    --muted-foreground: 220 10% 46%;
+
+    --accent: 224 76% 48%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 14% 89%;
+    --input: 220 14% 89%;
+    --ring: 224 76% 48%;
+
+    --radius: 0.875rem;
+
+    /* Semantic finance tokens */
+    --cash-in: 152 60% 38%;
+    --cash-in-soft: 152 60% 92%;
+    --cash-out: 0 72% 51%;
+    --cash-out-soft: 0 72% 95%;
+    --info: 224 76% 48%;
+    --info-soft: 224 76% 95%;
+    --info-foreground: 0 0% 100%;
+
+    /* Gradients & shadows */
+    --gradient-cash-in: linear-gradient(135deg, hsl(152 60% 38% / 0.08), hsl(152 60% 38% / 0.02));
+    --gradient-cash-out: linear-gradient(135deg, hsl(0 72% 51% / 0.08), hsl(0 72% 51% / 0.02));
+    --gradient-info: linear-gradient(135deg, hsl(224 76% 48% / 0.08), hsl(224 76% 48% / 0.02));
+    --gradient-neutral: linear-gradient(135deg, hsl(0 0% 100%), hsl(220 16% 98%));
+    --shadow-card: 0 1px 2px 0 hsl(220 40% 20% / 0.04), 0 4px 12px -4px hsl(220 40% 20% / 0.06);
+    --shadow-glow: 0 0 0 1px hsl(224 76% 48% / 0.2), 0 8px 24px -8px hsl(224 76% 48% / 0.3);
+
+    --transition-smooth: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 224 76% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 16% 95%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 220 14% 89%;
+    --sidebar-ring: 224 76% 48%;
+
+    /* Chart palette (light) */
+    --chart-1: 224 76% 48%;
+    --chart-2: 152 60% 38%;
+    --chart-3: 0 72% 51%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 280 70% 55%;
+  }
+
+  .dark {
+    --background: 222 28% 9%;
+    --foreground: 210 20% 96%;
+    --card: 222 24% 12%;
+    --card-foreground: 210 20% 96%;
+    --popover: 222 24% 12%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 222 20% 16%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 222 18% 18%;
+    --muted-foreground: 215 16% 70%;
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 222 18% 22%;
+    --input: 222 18% 22%;
+    --ring: 217 91% 60%;
+
+    /* Brighter, more readable chart tokens for dark mode */
+    --cash-in: 152 70% 55%;
+    --cash-in-soft: 152 60% 18%;
+    --cash-out: 0 80% 65%;
+    --cash-out-soft: 0 60% 20%;
+    --info: 217 91% 65%;
+    --info-soft: 217 60% 22%;
+    --info-foreground: 0 0% 100%;
+
+    --chart-1: 217 91% 65%;   /* electric blue */
+    --chart-2: 152 70% 55%;   /* mint green */
+    --chart-3: 0 80% 65%;     /* coral red */
+    --chart-4: 38 95% 60%;    /* amber */
+    --chart-5: 280 80% 70%;   /* violet */
+
+    /* Dark-mode neutral gradient so Total Balance card stays readable */
+    --gradient-neutral: linear-gradient(135deg, hsl(222 24% 14%), hsl(222 24% 11%));
+
+    /* Sidebar — dark mode tokens (must be defined or sidebar stays white) */
+    --sidebar-background: 222 26% 10%;
+    --sidebar-foreground: 210 20% 96%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 20% 16%;
+    --sidebar-accent-foreground: 210 20% 96%;
+    --sidebar-border: 222 18% 22%;
+    --sidebar-ring: 217 91% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}
+
+@layer components {
+  .stat-card {
+    @apply relative overflow-hidden rounded-2xl border border-border/60 p-3.5 sm:p-4 md:p-5 transition-all bg-card;
+    box-shadow: var(--shadow-card);
+  }
+  .stat-card-cash-in {
+    background: var(--gradient-cash-in);
+    @apply border-[hsl(var(--cash-in)/0.2)];
+  }
+  .stat-card-cash-out {
+    background: var(--gradient-cash-out);
+    @apply border-[hsl(var(--cash-out)/0.2)];
+  }
+  .stat-card-info {
+    background: var(--gradient-info);
+    @apply border-[hsl(var(--info)/0.2)];
+  }
+  .stat-card-neutral {
+    background: var(--gradient-neutral);
+  }
+}
