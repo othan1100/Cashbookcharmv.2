@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Plus, TrendingUp, TrendingDown, Activity, Wallet, Loader2, Pencil } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
 import { SectionCard } from "@/components/SectionCard";
@@ -8,13 +8,15 @@ import { TransactionDialog } from "@/components/TransactionDialog";
 import { useTransactions, useCustomers, type DbTransaction } from "@/hooks/useData";
 import { formatMoney, formatDate } from "@/lib/format";
 import {
-  Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
+import { OfflineSyncStatus } from "@/components/OfflineSyncStatus";
 
 const PIE_COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-4))", "hsl(var(--chart-5))", "hsl(var(--chart-3))"];
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { data: transactions, loading, refresh } = useTransactions();
   const { data: customers } = useCustomers();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -63,6 +65,42 @@ export default function Dashboard() {
 
   const recent = transactions.slice(0, 5);
 
+  const paymentMethodsData = useMemo(() => {
+    const methods = ["Cash", "Card", "Bank", "Mobile"];
+    return methods.map((m) => {
+      const channelTx = transactions.filter((t) => t.payment_method === m);
+      const inflow = channelTx.filter((t) => t.type === "in").reduce((s, t) => s + Number(t.amount), 0);
+      const outflow = channelTx.filter((t) => t.type === "out").reduce((s, t) => s + Number(t.amount), 0);
+      return {
+        method: m,
+        inflow,
+        outflow,
+        total: inflow + outflow
+      };
+    });
+  }, [transactions]);
+
+  const peakHoursData = useMemo(() => {
+    const hours = Array.from({ length: 24 }).map((_, i) => {
+      const label = `${String(i).padStart(2, "0")}:00`;
+      return { hour: label, count: 0 };
+    });
+
+    transactions.forEach((t) => {
+      try {
+        const date = new Date(t.date);
+        const hr = date.getHours();
+        if (hr >= 0 && hr < 24) {
+          hours[hr].count += 1;
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    return hours.filter((_, idx) => idx >= 6 && idx <= 22);
+  }, [transactions]);
+
   if (loading) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
@@ -79,6 +117,8 @@ export default function Dashboard() {
         </Button>
       </header>
       <TransactionDialog open={dialogOpen} onOpenChange={(v) => { setDialogOpen(v); if (!v) setEditing(null); }} onCreated={refresh} editing={editing} />
+
+      <OfflineSyncStatus />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Cash In" value={formatMoney(stats.cashIn)} icon={TrendingUp} variant="cash-in" />
@@ -135,6 +175,44 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
       </SectionCard>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SectionCard title="Payment Channel Analysis" description="Compare inflow and outflow volume across payment methods">
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={paymentMethodsData} layout="vertical" barCategoryGap={10}>
+                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis dataKey="method" type="category" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 12 }} cursor={{ fill: "hsl(var(--muted) / 0.4)" }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar name="Cash In" dataKey="inflow" fill="hsl(var(--cash-in))" radius={[0, 4, 4, 0]} />
+                <Bar name="Cash Out" dataKey="outflow" fill="hsl(var(--cash-out))" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Transaction Volume Density" description="Peak activity distribution by hour">
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={peakHoursData}>
+                <defs>
+                  <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(var(--info))" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="hsl(var(--info))" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="hour" stroke="hsl(var(--muted-foreground))" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 12 }} />
+                <Area type="monotone" name="Transactions Count" dataKey="count" stroke="hsl(var(--info))" fillOpacity={1} fill="url(#colorCount)" strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      </div>
 
       <SectionCard title="Recent Transactions">
         {recent.length === 0 ? (

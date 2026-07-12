@@ -9,6 +9,7 @@ import { usePlan, type PlanType } from "@/hooks/usePlan";
 import { useI18n } from "@/hooks/useI18n";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { UpgradeButton } from "@/components/UpgradeButton";
 
 type DbPlan = {
   id: string;
@@ -63,6 +64,10 @@ export default function Pricing() {
   const highlightParam = searchParams.get("highlight");
   const [supportWa, setSupportWa] = useState<string | null>(null);
   const [payFor, setPayFor] = useState<DbPlan | null>(null);
+
+  const handleUpgrade = (planId: string) => {
+    navigate(`/checkout?plan=${planId}&cycle=${yearly ? "yearly" : "monthly"}`);
+  };
 
   useEffect(() => {
     document.title = "Pricing — CashBook";
@@ -203,9 +208,11 @@ export default function Pricing() {
                 {isCurrent ? (
                   <Button disabled className="w-full rounded-xl">{t("currentPlan")}</Button>
                 ) : (
-                  <Button onClick={() => navigate(`/checkout?plan=${p.id}&cycle=${yearly ? "yearly" : "monthly"}`)} className="w-full rounded-xl">
-                    {t("upgrade")} — Pay with mobile wallet
-                  </Button>
+                  <UpgradeButton
+                    planName={p.name}
+                    className="w-full"
+                    onUpgrade={() => handleUpgrade(p.id)}
+                  />
                 )}
                 {isCurrent && waLink && (
                   <a href={waLink} target="_blank" rel="noopener noreferrer"

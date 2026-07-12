@@ -50,19 +50,7 @@ export default function BillingReturn() {
     };
   }, [params]);
 
-  // Handle auto-redirect countdown
-  useEffect(() => {
-    if (state !== "ok") return;
-    if (countdown <= 0) {
-      window.location.href = "/";
-      return;
-    }
-    const timer = setTimeout(() => {
-      setCountdown((c) => c - 1);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [state, countdown]);
-
+  // Handle return to dashboard manually
   const handleGoToDashboard = () => {
     window.location.href = "/";
   };
@@ -109,8 +97,8 @@ export default function BillingReturn() {
                 {message} All premium limits and business features have been unlocked immediately.
               </p>
 
-              <div className="w-full bg-slate-50 border border-slate-150 p-3 rounded-xl text-[11px] text-slate-400 font-medium">
-                Redirecting you to your dashboard in <strong className="text-[#163BB4] font-bold text-xs">{countdown}s</strong>...
+              <div className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-[11px] text-slate-500 font-medium">
+                Your payment is fully verified. Click below to explore your new premium features.
               </div>
 
               <Button 

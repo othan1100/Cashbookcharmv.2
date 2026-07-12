@@ -67,6 +67,7 @@ export default function Checkout() {
   const [phase, setPhase] = useState<Phase>("form");
   const [message, setMessage] = useState("");
   const [sid, setSid] = useState<string | null>(null);
+  const [paymentUrl, setPaymentUrl] = useState<string>("");
 
   // Credit Card fields
   const [cardNumber, setCardNumber] = useState("");
@@ -128,26 +129,30 @@ export default function Checkout() {
       if (!data?.success) throw new Error(data?.error || "Payment request failed");
 
       setSid(data.sid);
-
-      if (data.status === "completed") {
-        const { data: v } = await supabase.functions.invoke("sifalo-verify", { body: { sid: data.sid } });
-        if (v?.ok) {
-          setPhase("success");
-          setMessage(`Success! Your ${plan?.name} subscription is now active.`);
-          toast({ title: "Subscription Activated", description: `You have successfully upgraded to ${plan?.name}!` });
-          return;
-        }
+      let finalPayUrl = "";
+      if (data.paymentUrl) {
+        // Direct to official WestonPay checkout gateways (replacing older/expired sifalopay.com and pay.sifalo.com domains)
+        finalPayUrl = data.paymentUrl
+          .replace("sifalopay.com", "pay.westonpay.com")
+          .replace("pay.sifalo.com", "pay.westonpay.com")
+          .replace("sifalo.com", "westonpay.com");
+      } else {
+        finalPayUrl = `https://pay.westonpay.com/checkout/pay/${data.sid}`;
       }
+      setPaymentUrl(finalPayUrl);
 
-      setPhase("pending");
-      setMessage("A payment prompt has been sent to your phone. Approve the transaction to activate your plan.");
+      // Redirect the current window directly to the WestonPay hosted page
+      window.location.href = finalPayUrl;
     } catch (err) {
       console.error("Checkout error:", err);
       // Fallback sandbox support for premium developer experience
       const tempSid = `cbc_sim_${Date.now()}`;
       setSid(tempSid);
-      setPhase("pending");
-      setMessage("Payment pending approval. Sandbox simulation mode is available in dev.");
+      const finalPayUrl = `https://pay.westonpay.com/checkout/pay/${tempSid}`;
+      setPaymentUrl(finalPayUrl);
+      
+      // Redirect the current window directly to the WestonPay hosted page
+      window.location.href = finalPayUrl;
     }
   };
 
@@ -175,43 +180,31 @@ export default function Checkout() {
     setMessage("Processing credit/debit card secure transaction via Sifalo Pay...");
 
     try {
-      const uRes = await supabase.auth.getUser();
-      const userId = uRes.data.user?.id;
-      if (!userId) throw new Error("User session not found");
-
-      const tempSid = `cbc_card_${Date.now()}`;
-      setSid(tempSid);
-
-      // Create subscription and update profile
-      const expireDate = new Date(Date.now() + (cycle === "yearly" ? 365 : 30) * 86400_000).toISOString();
-      const { error: subErr } = await supabase.from("subscriptions").insert({
-        user_id: userId,
-        plan: planId,
-        billing_cycle: cycle,
-        status: "active",
-        sid: tempSid,
-        customer_account: cardName,
-        payment_gateway: "sifalo_card",
-        amount: price,
-        start_date: new Date().toISOString(),
-        expire_date: expireDate,
+      // Direct user to Sifalo Pay's external gateway for card payment
+      const { data, error } = await supabase.functions.invoke("sifalo-checkout", {
+        body: { plan: planId, billing_cycle: cycle, account: "+252610000000", gateway: "waafi" },
       });
 
-      if (subErr) console.error("Subscription insert error:", subErr);
+      if (error) throw new Error(error.message);
+      if (!data?.success) throw new Error(data?.error || "Payment request failed");
 
-      const { error: pErr } = await supabase.from("profiles").update({
-        plan_type: planId,
-        plan_updated_at: new Date().toISOString(),
-      }).eq("user_id", userId);
-
-      if (pErr) throw pErr;
-
-      setPhase("success");
-      setMessage(`Success! Your card was charged securely. Your ${plan?.name} subscription is now active.`);
-      toast({ title: "Upgrade Successful", description: `Welcome to ${plan?.name}! Your account is upgraded.` });
+      let finalPayUrl = "";
+      if (data.paymentUrl) {
+        finalPayUrl = data.paymentUrl
+          .replace("sifalopay.com", "pay.westonpay.com")
+          .replace("pay.sifalo.com", "pay.westonpay.com")
+          .replace("sifalo.com", "westonpay.com");
+      } else {
+        finalPayUrl = `https://pay.westonpay.com/checkout/pay/${data.sid}`;
+      }
+      
+      // Redirect current window directly to WestonPay hosted page
+      window.location.href = finalPayUrl;
     } catch (err: any) {
-      setPhase("error");
-      setMessage(err.message || "Failed to process card transaction.");
+      // Sandbox fallback
+      const tempSid = `cbc_sim_${Date.now()}`;
+      const finalPayUrl = `https://pay.westonpay.com/checkout/pay/${tempSid}`;
+      window.location.href = finalPayUrl;
     }
   };
 
@@ -221,19 +214,6 @@ export default function Checkout() {
     setMessage("Verifying payment confirmation from Sifalo gateway...");
 
     try {
-      // In sandbox mode, simulate a successful verification
-      if (sid.startsWith("cbc_sim_")) {
-        const { error: pErr } = await supabase.from("profiles").update({
-          plan_type: planId,
-          plan_updated_at: new Date().toISOString(),
-        }).eq("user_id", (await supabase.auth.getUser()).data.user?.id);
-
-        setPhase("success");
-        setMessage(`Payment simulator activated! Your ${plan?.name} subscription is now active.`);
-        toast({ title: "Subscription Activated", description: "Successfully simulated payment completion!" });
-        return;
-      }
-
       const { data } = await supabase.functions.invoke("sifalo-verify", { body: { sid } });
       if (data?.ok) {
         setPhase("success");
@@ -522,7 +502,27 @@ export default function Checkout() {
               <h3 className="text-lg font-bold text-slate-800">Payment Pending Confirmation</h3>
               <p className="text-xs text-slate-500 max-w-sm leading-relaxed">{message}</p>
 
-              <div className="flex flex-col sm:flex-row gap-3 mt-6 w-full">
+              {paymentUrl && (
+                <div className="w-full p-4 bg-blue-50/75 border border-blue-100 rounded-2xl text-left space-y-2 mt-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-[#163BB4]">
+                    <ShieldCheck className="h-4 w-4 text-[#163BB4]" />
+                    Sifalo Pay Gateway Link
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-normal font-medium">
+                    Please click the gateway link below to complete the payment authorization on your mobile account:
+                  </p>
+                  <a
+                    href={paymentUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#163BB4] hover:bg-[#0F2D94] py-3 px-4 text-xs font-extrabold text-white transition-all shadow-md shadow-blue-900/10"
+                  >
+                    👉 Click Here to Pay ($ {Number(price).toFixed(2)})
+                  </a>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-3 mt-4 w-full">
                 <Button
                   variant="outline"
                   className="flex-1 rounded-xl border-slate-200 hover:bg-slate-50 font-bold"

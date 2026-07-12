@@ -1,4 +1,14 @@
 
+-- Ensure all columns on pricing_plans exist before updating them
+ALTER TABLE public.pricing_plans
+  ADD COLUMN IF NOT EXISTS tagline text,
+  ADD COLUMN IF NOT EXISTS features jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS highlighted boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS sort_order integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS yearly_discount_pct numeric NOT NULL DEFAULT 20,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
 -- 1) Update pricing + features
 UPDATE public.pricing_plans
 SET monthly_price = 9,

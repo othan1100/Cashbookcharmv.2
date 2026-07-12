@@ -11,6 +11,7 @@ import { useTransactions, useCustomers, type DbTransaction } from "@/hooks/useDa
 import { formatDate, formatMoney } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { addOfflineMutation, generateUUID } from "@/lib/offlineSync";
 
 type Filter = "all" | "in" | "out";
 
@@ -54,9 +55,42 @@ export default function Transactions() {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this transaction?")) return;
-    const { error } = await supabase.from("transactions").delete().eq("id", id);
-    if (error) return toast({ title: "Delete failed", description: error.message, variant: "destructive" });
-    toast({ title: "Transaction deleted" });
+    
+    let error: any = null;
+    let savedOffline = false;
+
+    if (!navigator.onLine) {
+      savedOffline = true;
+      addOfflineMutation("transactions", "delete", null, id);
+    } else {
+      try {
+        const res = await supabase.from("transactions").delete().eq("id", id);
+        error = res.error;
+      } catch (err: any) {
+        console.warn("Delete failed, caching offline:", err);
+        savedOffline = true;
+        addOfflineMutation("transactions", "delete", null, id);
+      }
+    }
+
+    if (error) {
+      const msg = error.message || "";
+      if (msg.includes("fetch") || msg.includes("NetworkError") || error.status === 0) {
+        savedOffline = true;
+        addOfflineMutation("transactions", "delete", null, id);
+      } else {
+        return toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+      }
+    }
+
+    if (savedOffline) {
+      toast({
+        title: "Deleted locally",
+        description: "Your change is saved offline and will sync once internet is restored.",
+      });
+    } else {
+      toast({ title: "Transaction deleted" });
+    }
     refresh();
   };
 
@@ -64,15 +98,59 @@ export default function Transactions() {
   const handleAdd = () => { setEditing(null); setOpen(true); };
 
   const handleCopy = async (t: DbTransaction, opposite = false) => {
-    const { error } = await supabase.from("transactions").insert({
-      user_id: t.user_id, cashbook_id: t.cashbook_id,
+    const payload = {
+      user_id: t.user_id,
+      cashbook_id: t.cashbook_id,
       type: opposite ? (t.type === "in" ? "out" : "in") : t.type,
-      amount: t.amount, category: t.category, note: t.note,
-      payment_method: t.payment_method, customer_id: t.customer_id,
+      amount: Number(t.amount),
+      category: t.category,
+      note: t.note,
+      payment_method: t.payment_method,
+      customer_id: t.customer_id,
       date: new Date().toISOString(),
-    });
-    if (error) return toast({ title: "Copy failed", description: error.message, variant: "destructive" });
-    toast({ title: opposite ? "Opposite entry added" : "Entry copied" });
+    };
+
+    let error: any = null;
+    let savedOffline = false;
+
+    if (!navigator.onLine) {
+      savedOffline = true;
+      const newId = generateUUID();
+      addOfflineMutation("transactions", "insert", { ...payload, id: newId });
+    } else {
+      try {
+        const res = await supabase.from("transactions").insert({
+          ...payload,
+          id: generateUUID(),
+        });
+        error = res.error;
+      } catch (err: any) {
+        console.warn("Copy failed, caching offline:", err);
+        savedOffline = true;
+        const newId = generateUUID();
+        addOfflineMutation("transactions", "insert", { ...payload, id: newId });
+      }
+    }
+
+    if (error) {
+      const msg = error.message || "";
+      if (msg.includes("fetch") || msg.includes("NetworkError") || error.status === 0) {
+        savedOffline = true;
+        const newId = generateUUID();
+        addOfflineMutation("transactions", "insert", { ...payload, id: newId });
+      } else {
+        return toast({ title: "Copy failed", description: error.message, variant: "destructive" });
+      }
+    }
+
+    if (savedOffline) {
+      toast({
+        title: "Copied locally",
+        description: "Your change is saved offline and will sync once internet is restored.",
+      });
+    } else {
+      toast({ title: opposite ? "Opposite entry added" : "Entry copied" });
+    }
     refresh();
   };
 
