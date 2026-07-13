@@ -21,6 +21,7 @@ import Admin from "./pages/Admin";
 import Team from "./pages/Team";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
+import NewPassword from "./pages/NewPassword";
 import Checkout from "./pages/Checkout";
 import NotFound from "./pages/NotFound";
 
@@ -39,6 +40,7 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/login" element={<Auth defaultMode="signin" />} />
             <Route path="/register" element={<Auth defaultMode="signup" />} />
+            <Route path="/new-password" element={<NewPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/reset-your-password" element={<ResetPassword />} />
             <Route path="/Reset-your-password" element={<ResetPassword />} />
