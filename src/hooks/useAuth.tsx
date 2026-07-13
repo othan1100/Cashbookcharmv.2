@@ -22,10 +22,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    // Detect password recovery in URL hash/search and redirect to /reset-password immediately
+    const hash = window.location.hash || "";
+    const search = window.location.search || "";
+    const params = new URLSearchParams(hash.replace("#", "?") || search);
+    const isRecovery = params.get("type") === "recovery" || hash.includes("type=recovery");
+
+    if (isRecovery && !window.location.pathname.includes("/reset-password") && !window.location.pathname.includes("/reset-your-password")) {
+      console.log("Detected password recovery in URL, redirecting to /reset-password");
+      window.location.href = `/reset-password${hash || search}`;
+      return;
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
       setLoading(false);
+
+      if (event === "PASSWORD_RECOVERY") {
+        console.log("PASSWORD_RECOVERY auth event, redirecting to /reset-password");
+        const currentHash = window.location.hash || "";
+        const currentSearch = window.location.search || "";
+        if (!window.location.pathname.includes("/reset-password") && !window.location.pathname.includes("/reset-your-password")) {
+          window.location.href = `/reset-password${currentHash || currentSearch}`;
+        }
+      }
     });
 
     supabase.auth.getSession().then(({ data: { session: existing } }) => {
