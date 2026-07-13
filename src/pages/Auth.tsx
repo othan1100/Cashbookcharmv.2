@@ -69,7 +69,7 @@ export default function Auth({ defaultMode }: { defaultMode?: "signin" | "signup
       toast({ title: "Welcome to CashBook!", description: "Your account has been created." });
       navigate("/");
     } else {
-      const redirectUrl = window.location.origin.includes("localhost") || window.location.origin.includes("run.app")
+      const redirectUrl = window.location.origin.includes("localhost") || window.location.origin.includes("run.app") || window.location.origin.includes("vercel.app")
         ? `${window.location.origin}/reset-password`
         : "https://app.cashbookcharm.online/reset-password";
       const { error } = await supabase.auth.resetPasswordForEmail(email, {

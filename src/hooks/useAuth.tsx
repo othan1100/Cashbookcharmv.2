@@ -26,7 +26,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const hash = window.location.hash || "";
     const search = window.location.search || "";
     const params = new URLSearchParams(hash.replace("#", "?") || search);
-    const isRecovery = params.get("type") === "recovery" || hash.includes("type=recovery");
+    const isRecovery = 
+      params.get("type") === "recovery" || 
+      hash.includes("type=recovery") || 
+      search.includes("type=recovery") ||
+      hash.includes("access_token") ||
+      search.includes("code=");
 
     if (isRecovery && !window.location.pathname.includes("/reset-password") && !window.location.pathname.includes("/reset-your-password")) {
       console.log("Detected password recovery in URL, redirecting to /reset-password");

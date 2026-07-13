@@ -29,7 +29,15 @@ export default function ResetPassword() {
   const hash = window.location.hash || "";
   const search = window.location.search || "";
   const params = new URLSearchParams(hash.replace("#", "?") || search);
-  const hasAccessToken = params.has("access_token") || params.has("refresh_token") || params.get("type") === "recovery";
+  const hasAccessToken = 
+    params.has("access_token") || 
+    params.has("refresh_token") || 
+    params.has("code") ||
+    params.get("type") === "recovery" ||
+    hash.includes("type=recovery") ||
+    search.includes("type=recovery") ||
+    hash.includes("access_token") ||
+    search.includes("code=");
 
   useEffect(() => {
     document.title = mode === "reset" ? "Set new password — Cashbook Charm" : "Reset your password — Cashbook Charm";
@@ -109,7 +117,7 @@ export default function ResetPassword() {
     setErrorMsg("");
 
     try {
-      const redirectUrl = window.location.origin.includes("localhost") || window.location.origin.includes("run.app")
+      const redirectUrl = window.location.origin.includes("localhost") || window.location.origin.includes("run.app") || window.location.origin.includes("vercel.app")
         ? `${window.location.origin}/reset-password`
         : "https://app.cashbookcharm.online/reset-password";
 
@@ -401,10 +409,10 @@ export default function ResetPassword() {
                   {busy ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin text-white" />
-                      <span>Resetting Password...</span>
+                      <span>Saving...</span>
                     </>
                   ) : (
-                    "Reset Password"
+                    "Save"
                   )}
                 </Button>
               </form>
