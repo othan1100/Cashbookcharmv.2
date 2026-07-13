@@ -99,11 +99,11 @@ export default function NewPassword() {
     };
   }, []);
 
-  // Handle countdown and auto redirect to /login
+  // Handle countdown and auto redirect to / (dashboard)
   useEffect(() => {
     if (!success) return;
     if (countdown <= 0) {
-      navigate("/login");
+      navigate("/");
       return;
     }
     const interval = setInterval(() => {
@@ -144,13 +144,11 @@ export default function NewPassword() {
         return;
       }
 
-      await supabase.auth.signOut();
-
       setBusy(false);
       setSuccess(true);
       toast({
         title: "Password Updated!",
-        description: "Your password has been changed successfully.",
+        description: "Your password has been changed and you are logged in automatically.",
       });
     } catch (err: any) {
       setBusy(false);
@@ -301,7 +299,7 @@ export default function NewPassword() {
                   <div className="space-y-2">
                     <h3 className="text-xl font-bold text-foreground dark:text-white font-sans">Update Password Success!</h3>
                     <p className="text-sm text-muted-foreground dark:text-white/60 leading-relaxed px-4">
-                      Your premium authentication keys have been regenerated. You will now be redirected to the secure login gateway.
+                      Your premium authentication keys have been regenerated. You are logged in automatically and will be redirected to your dashboard.
                     </p>
                     
                     {/* Countdown Progress Circle / Status bar */}
@@ -310,16 +308,16 @@ export default function NewPassword() {
                         {countdown}
                       </div>
                       <span className="text-xs text-muted-foreground/60 dark:text-white/40">
-                        Redirecting to secure portal in {countdown} seconds...
+                        Redirecting to dashboard in {countdown} seconds...
                       </span>
                     </div>
                   </div>
 
                   <Button 
-                    onClick={() => navigate("/login")} 
+                    onClick={() => navigate("/")} 
                     className="w-full h-12 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-violet-600 border-0 text-white font-semibold flex items-center justify-center gap-2 hover:opacity-90 shadow-lg shadow-indigo-500/20 transform active:scale-95 transition-all duration-200"
                   >
-                    Go to Secure Sign In <ArrowRight className="h-4.5 w-4.5" />
+                    Go to Dashboard <ArrowRight className="h-4.5 w-4.5" />
                   </Button>
                 </div>
               ) : (

@@ -70,8 +70,8 @@ export default function Auth({ defaultMode }: { defaultMode?: "signin" | "signup
       navigate("/");
     } else {
       const redirectUrl = window.location.origin.includes("localhost") || window.location.origin.includes("run.app") || window.location.origin.includes("vercel.app")
-        ? `${window.location.origin}/new-password`
-        : "https://app.cashbookcharm.online/new-password";
+        ? `${window.location.origin}/New-Password`
+        : "https://app.cashbookcharm.online/New-Password";
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: redirectUrl,
       });

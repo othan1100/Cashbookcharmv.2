@@ -33,9 +33,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       hash.includes("access_token") ||
       search.includes("code=");
 
-    if (isRecovery && !window.location.pathname.includes("/new-password") && !window.location.pathname.includes("/reset-password") && !window.location.pathname.includes("/reset-your-password")) {
-      console.log("Detected password recovery in URL, redirecting to /new-password");
-      window.location.href = `/new-password${hash || search}`;
+    const currentPath = window.location.pathname.toLowerCase();
+    const isAlreadyOnNewPassword = currentPath.includes("/new-password");
+    const isAlreadyOnResetPassword = currentPath.includes("/reset-password") || currentPath.includes("/reset-your-password");
+
+    if (isRecovery && !isAlreadyOnNewPassword && !isAlreadyOnResetPassword) {
+      console.log("Detected password recovery in URL, redirecting to /New-Password");
+      window.location.href = `/New-Password${hash || search}`;
       return;
     }
 
@@ -45,11 +49,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
 
       if (event === "PASSWORD_RECOVERY") {
-        console.log("PASSWORD_RECOVERY auth event, redirecting to /new-password");
+        console.log("PASSWORD_RECOVERY auth event, redirecting to /New-Password");
         const currentHash = window.location.hash || "";
         const currentSearch = window.location.search || "";
-        if (!window.location.pathname.includes("/new-password") && !window.location.pathname.includes("/reset-password") && !window.location.pathname.includes("/reset-your-password")) {
-          window.location.href = `/new-password${currentHash || currentSearch}`;
+        const pathLower = window.location.pathname.toLowerCase();
+        if (!pathLower.includes("/new-password") && !pathLower.includes("/reset-password") && !pathLower.includes("/reset-your-password")) {
+          window.location.href = `/New-Password${currentHash || currentSearch}`;
         }
       }
     });
