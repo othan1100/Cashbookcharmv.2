@@ -8,32 +8,34 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 
+function decodeJwt(token: string) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      window.atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(jsonPayload);
+  } catch (e) {
+    console.error("Failed to decode JWT:", e);
+    return null;
+  }
+}
+
 export default function NewPassword() {
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
   
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(true);
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const [countdown, setCountdown] = useState(4);
-
-  // Form Fields
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  
-  // Visibility Toggles
-  const [showPass, setShowPass] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-
-  // Password Validation States
-  const isMinLength = password.length >= 8;
-  const hasUppercase = /[A-Z]/.test(password);
-  const hasNumberOrSpec = /[0-9!@#$%^&*(),.?":{}|<>]/.test(password);
-  const isMatching = password && password === confirm;
-  const isPasswordValid = isMinLength && hasUppercase && hasNumberOrSpec && isMatching;
+  const [countdown, setCountdown] = useState(3);
 
   // URL Hash Parsing for token authentication
   const hash = window.location.hash || "";
@@ -49,6 +51,34 @@ export default function NewPassword() {
     hash.includes("access_token") ||
     search.includes("code=");
 
+  // Form Fields initialized from JWT if available
+  const [email, setEmail] = useState(() => {
+    try {
+      const accessToken = params.get("access_token");
+      if (accessToken) {
+        const payload = decodeJwt(accessToken);
+        if (payload?.email) return payload.email;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return "";
+  });
+
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  
+  // Visibility Toggles
+  const [showPass, setShowPass] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  // Password Validation States
+  const isMinLength = password.length >= 8;
+  const hasUppercase = /[A-Z]/.test(password);
+  const hasNumberOrSpec = /[0-9!@#$%^&*(),.?":{}|<>]/.test(password);
+  const isMatching = password && password === confirm;
+  const isPasswordValid = isMinLength && hasUppercase && hasNumberOrSpec && isMatching;
+
   useEffect(() => {
     document.title = "Create New Password — Cashbook Charm";
   }, []);
@@ -58,7 +88,6 @@ export default function NewPassword() {
     const errorDescription = params.get("error_description") || params.get("error");
     if (errorDescription) {
       setErrorMsg("The password reset link is invalid or has expired. Please request a new one.");
-      setReady(true);
       return;
     }
 
@@ -66,9 +95,7 @@ export default function NewPassword() {
     const loadUserInfo = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
-        setEmail(session.user.email || "");
-        setName(session.user.user_metadata?.full_name || session.user.user_metadata?.name || "");
-        setReady(true);
+        if (!email) setEmail(session.user.email || "");
       }
     };
     
@@ -77,29 +104,21 @@ export default function NewPassword() {
     // Listen to changes to detect password recovery session
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
-        setEmail(session.user.email || "");
-        setName(session.user.user_metadata?.full_name || session.user.user_metadata?.name || "");
-        setReady(true);
+        if (!email) setEmail(session.user.email || "");
       }
     });
 
-    // Timeout fallback if no session is active/restored
-    const timer = setTimeout(() => {
-      setReady(true);
-    }, 1500);
-
     return () => {
       sub.subscription.unsubscribe();
-      clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAccessToken]);
 
-  // Handle auto redirect to login
+  // Handle auto redirect to dashboard /
   useEffect(() => {
     if (!success) return;
     if (countdown <= 0) {
-      navigate("/login");
+      navigate("/");
       return;
     }
     const interval = setInterval(() => {
@@ -125,12 +144,9 @@ export default function NewPassword() {
     setBusy(true);
 
     try {
-      // 1. Update Password and User Metadata in Supabase
+      // 1. Update Password in Supabase Auth
       const { error: updateError } = await supabase.auth.updateUser({
-        password: password,
-        data: {
-          full_name: name || undefined,
-        }
+        password: password
       });
 
       if (updateError) {
@@ -144,14 +160,11 @@ export default function NewPassword() {
         return;
       }
 
-      // 2. Sign out the user to force logging in with the brand new credentials
-      await supabase.auth.signOut();
-
       setBusy(false);
       setSuccess(true);
       toast({
-        title: "Password Saved!",
-        description: "Your new password has been set successfully.",
+        title: "Password Updated Successfully!",
+        description: "You have been logged in automatically.",
       });
     } catch (err: any) {
       setBusy(false);
@@ -221,18 +234,18 @@ export default function NewPassword() {
               <div className="space-y-2">
                 <h2 className="text-lg font-bold text-foreground dark:text-white font-sans">Password updated!</h2>
                 <p className="text-sm text-muted-foreground dark:text-white/60 leading-relaxed px-2">
-                  Your new password has been saved. Please sign in again using your new credentials.
+                  Your new password has been saved. You are being logged in automatically.
                 </p>
                 <p className="text-xs text-muted-foreground/60 dark:text-white/40">
-                  Redirecting to the login screen in <span className="font-bold text-primary dark:text-[#60A5FA]">{countdown}s</span>...
+                  Redirecting to your dashboard in <span className="font-bold text-primary dark:text-[#60A5FA]">{countdown}s</span>...
                 </p>
               </div>
 
               <Button 
-                onClick={() => navigate("/login")} 
+                onClick={() => navigate("/")} 
                 className="w-full h-11 rounded-xl bg-gradient-to-br from-[#1D4ED8] to-[#3B82F6] border-0 text-white font-semibold flex items-center justify-center gap-2 hover:opacity-90 shadow-lg shadow-[#3B82F6]/20"
               >
-                Go to Sign In <ArrowRight className="h-4 w-4" />
+                Go to Dashboard <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
           ) : (
@@ -245,7 +258,7 @@ export default function NewPassword() {
                 </div>
               )}
 
-              {/* Email (Read Only or Editable) */}
+              {/* Email (Read Only) */}
               <div className="space-y-1.5">
                 <Label htmlFor="email" className="text-foreground/80 dark:text-white/80 font-medium text-xs">Email Address</Label>
                 <div className="relative">
@@ -256,28 +269,10 @@ export default function NewPassword() {
                     placeholder="your-email@example.com"
                     value={email} 
                     onChange={(e) => setEmail(e.target.value)}
-                    className="border-input bg-background/50 text-foreground placeholder:text-muted-foreground/50 dark:border-white/10 dark:bg-white/5 dark:text-white pl-10 h-10 rounded-xl focus-visible:ring-1 focus-visible:ring-[#3B82F6]" 
-                    // Set as readOnly if loaded from recovery session, but keep fully functional
-                    readOnly={!!email}
+                    className="border-input bg-background/50 text-foreground placeholder:text-muted-foreground/50 dark:border-white/10 dark:bg-white/5 dark:text-white pl-10 h-10 rounded-xl focus-visible:ring-1 focus-visible:ring-[#3B82F6] opacity-80 cursor-not-allowed" 
+                    readOnly
                   />
                   <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60 dark:text-white/40" />
-                </div>
-              </div>
-
-              {/* Name Field */}
-              <div className="space-y-1.5">
-                <Label htmlFor="name" className="text-foreground/80 dark:text-white/80 font-medium text-xs">Full Name</Label>
-                <div className="relative">
-                  <Input 
-                    id="name"
-                    type="text" 
-                    required 
-                    placeholder="Enter your name"
-                    value={name} 
-                    onChange={(e) => setName(e.target.value)}
-                    className="border-input bg-background text-foreground placeholder:text-muted-foreground/50 dark:border-white/10 dark:bg-white/5 dark:text-white pl-10 h-10 rounded-xl focus-visible:ring-1 focus-visible:ring-[#3B82F6]" 
-                  />
-                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60 dark:text-white/40" />
                 </div>
               </div>
 
@@ -385,7 +380,7 @@ export default function NewPassword() {
                     <span>Saving...</span>
                   </>
                 ) : (
-                  "Save"
+                  "Update Password"
                 )}
               </Button>
 
