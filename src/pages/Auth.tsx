@@ -69,8 +69,11 @@ export default function Auth({ defaultMode }: { defaultMode?: "signin" | "signup
       toast({ title: "Welcome to CashBook!", description: "Your account has been created." });
       navigate("/");
     } else {
+      const redirectUrl = window.location.origin.includes("localhost") || window.location.origin.includes("run.app")
+        ? `${window.location.origin}/reset-password`
+        : "https://app.cashbookcharm.online/reset-password";
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: redirectUrl,
       });
       setBusy(false);
       if (error) return toast({ title: "Couldn't send email", description: error.message, variant: "destructive" });
@@ -181,7 +184,7 @@ export default function Auth({ defaultMode }: { defaultMode?: "signin" | "signup
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password" className="text-foreground/80 dark:text-white/80">Password</Label>
                   {mode === "signin" && (
-                    <button type="button" onClick={() => setMode("forgot")} className="text-xs font-medium text-primary hover:underline dark:text-[#60A5FA]">
+                    <button type="button" onClick={() => navigate("/reset-password")} className="text-xs font-medium text-primary hover:underline dark:text-[#60A5FA]">
                       Forgot password?
                     </button>
                   )}

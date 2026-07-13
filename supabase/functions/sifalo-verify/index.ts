@@ -46,17 +46,25 @@ Deno.serve(async (req) => {
     if (userErr || !user) return j({ ok: false, error: "Unauthorized" }, 401);
     const userId = user.id;
 
-    let body: { sid?: string };
+    let body: { sid?: string; order_id?: string };
     try { body = await req.json(); } catch { return j({ ok: false, error: "Invalid JSON" }, 400); }
     const sid = String(body.sid ?? "").trim();
-    if (!sid) return j({ ok: false, error: "sid required" }, 400);
+    const orderId = String(body.order_id ?? "").trim();
+    if (!sid && !orderId) return j({ ok: false, error: "sid or order_id required" }, 400);
 
     const adminClient = admin || createClient(SUPABASE_URL, SERVICE_ROLE);
 
     let sub = null;
-    const { data: foundSub } = await adminClient.from("subscriptions")
-      .select("*").eq("sid", sid).eq("user_id", userId).maybeSingle();
-    sub = foundSub;
+    if (sid) {
+      const { data: foundSub } = await adminClient.from("subscriptions")
+        .select("*").eq("sid", sid).eq("user_id", userId).maybeSingle();
+      sub = foundSub;
+    }
+    if (!sub && orderId) {
+      const { data: foundSubByOrder } = await adminClient.from("subscriptions")
+        .select("*").eq("sid", orderId).eq("user_id", userId).maybeSingle();
+      sub = foundSubByOrder;
+    }
 
     if (!sub && sid.startsWith("cbc_sim_")) {
       const plan = sid.includes("_team_") ? "team" : "pro";
@@ -107,20 +115,62 @@ Deno.serve(async (req) => {
       return j({ ok: true, already_active: true, plan: sub.plan });
     }
 
+    // Link real Sifalo transaction ID to the subscription
+    if (sub && sid && sub.sid !== sid && !sid.startsWith("cbc_sim_") && !sub.sid.startsWith("cbc_sim_")) {
+      const { error: upSidErr } = await adminClient.from("subscriptions")
+        .update({ sid: sid }).eq("id", sub.id);
+      if (upSidErr) {
+        console.warn("[sifalo-verify] Failed to update subscription sid to real sid:", upSidErr);
+      } else {
+        console.log("[sifalo-verify] Subscription sid updated from order_id to real sid:", sid);
+        sub.sid = sid;
+      }
+    }
+
     let verified = false;
-    if (sid.startsWith("cbc_sim_")) {
+    let sifaloCode = "";
+    let sifaloStatus = "";
+    let sifaloPaymentType = "";
+    let sifaloAmount = "";
+
+    const isSimulated = (sid && sid.startsWith("cbc_sim_")) || (sub && sub.sid && sub.sid.startsWith("cbc_sim_"));
+
+    if (isSimulated) {
       verified = true;
+      sifaloCode = "601";
+      sifaloStatus = "success";
+      sifaloPaymentType = "Sandbox Wallet";
+      sifaloAmount = sub ? String(sub.amount || "5.99") : "5.99";
     } else if (SIFALO_API_KEY) {
       try {
-        const res = await fetch(`https://api.sifalopay.com/gateway/verify?sid=${encodeURIComponent(sid)}`, {
-          headers: { "Authorization": `Basic ${SIFALO_API_KEY}` },
+        const verifyBody: Record<string, string> = {};
+        if (sid) {
+          verifyBody.sid = sid;
+        } else if (orderId) {
+          verifyBody.order_id = orderId;
+        }
+
+        const res = await fetch("https://api.sifalopay.com/gateway/verify.php", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Basic ${SIFALO_API_KEY}`,
+          },
+          body: JSON.stringify(verifyBody),
         });
         const raw = await res.text();
         console.log("[sifalo-verify] response", res.status, raw.slice(0, 400));
         let data: Record<string, unknown> = {};
         try { data = JSON.parse(raw); } catch { /* non-JSON */ }
-        const code = String((data.code as string | undefined) ?? "");
+        
+        const code = String((data.code as string | undefined) ?? (data.payment_code as string | undefined) ?? "");
         const status = String((data.status as string | undefined) ?? (data.payment_status as string | undefined) ?? "").toLowerCase();
+        
+        sifaloCode = code;
+        sifaloStatus = status;
+        sifaloPaymentType = String(data.payment_type ?? data.gateway ?? "");
+        sifaloAmount = String(data.amount ?? "");
+        
         // Sifalo: 601 = success; other success words as fallback
         verified = code === "601" || ["success", "paid", "completed", "active"].some((s) => status.includes(s));
       } catch (e) {
@@ -129,7 +179,17 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (!verified) return j({ ok: false, error: "Payment not confirmed" }, 402);
+    if (!verified) {
+      return j({ 
+        ok: false, 
+        error: "Payment not confirmed", 
+        code: sifaloCode || "602", 
+        status: sifaloStatus || "pending",
+        payment_type: sifaloPaymentType,
+        amount: sifaloAmount,
+        sid: sid || orderId
+      }, 402);
+    }
 
     const cycle = sub.billing_cycle === "yearly" ? "yearly" : "monthly";
     const expire = new Date(Date.now() + (cycle === "yearly" ? 365 : 30) * 86400_000).toISOString();
@@ -145,7 +205,16 @@ Deno.serve(async (req) => {
     if (pErr) console.error("[sifalo-verify] profile update error", pErr);
 
     console.log("[sifalo-verify] activated", { userId, plan: sub.plan });
-    return j({ ok: true, plan: sub.plan, expire_date: expire });
+    return j({ 
+      ok: true, 
+      plan: sub.plan, 
+      expire_date: expire,
+      code: sifaloCode || "601",
+      status: sifaloStatus || "success",
+      payment_type: sifaloPaymentType,
+      amount: sifaloAmount,
+      sid: sub.sid || sid || orderId
+    });
   } catch (outerErr: any) {
     console.error("[sifalo-verify] Unhandled fatal edge function error:", outerErr);
     return j({ ok: false, error: outerErr?.message || "An unexpected error occurred during verification processing." }, 200);

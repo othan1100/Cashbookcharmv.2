@@ -66,6 +66,10 @@ export default function Pricing() {
   const [payFor, setPayFor] = useState<DbPlan | null>(null);
 
   const handleUpgrade = (planId: string) => {
+    if (planId === "pro" && !yearly) {
+      window.location.href = "https://pay.sifalo.com/checkout/?key=OWVlZDEwZjYzODVmYmRlNzk5NjQxODZjOWFhODJjZDNiNmI4YmFjYg%253D%253D&token=UmZOfW6woY0z15zt%252BRAD2BwJ%252FV0b4bWGyunMVuP4M09rThjYo9ayjCMJDo%252B2Om3MLxL9DjWQMGb3D809aTkEoWN%252FQ4vHpy9Kg9%252BYCVwSQHJKnU0RvUvEzaX9E5mxJJncsQri6YISTR7fPseYUTtzuygdVkQ2T2V5CJaGbJgJMr08VoU4ehTenMKPhDkejFNxNtrWwD8Yp4hbcr17Upfj4St2BBhuU6pCMe0bx1Rw9BFZV132NOlf4d2qkYpnQoJ%252F5vb2enVvRfIyfg9oShAW1DVDd0K1wVe00GkHVrA2zpitq6LfqOTqBgAgS4GWcl8LUzUuIZ5vkHMNprbvBMJRFdoic5epSf7cwdcLSzCBXl2RpavviHypto%252BLR0%252FdzN2HkIV6t%252FWkDlxa8q6SKqa3%252Bv%252BjoV2Hk2SEnNPYyq9K%252Faajwzaf2QkOqJTB%252BN34CGwrXjNH0QuEvtjiw1xTcwILSmF64RC9DFT6%252FXzdhduv9OFqXTTSTieZ26vGmDkQztNJuBTZPKvG5gUHRT0GnoA8PF5KWFeMDJlkZLV9JGU6LhvUSGKOdiTxd3rqB4leBZcl";
+      return;
+    }
     navigate(`/checkout?plan=${planId}&cycle=${yearly ? "yearly" : "monthly"}`);
   };
 

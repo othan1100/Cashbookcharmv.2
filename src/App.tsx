@@ -40,6 +40,8 @@ const App = () => (
             <Route path="/login" element={<Auth defaultMode="signin" />} />
             <Route path="/register" element={<Auth defaultMode="signup" />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/reset-your-password" element={<ResetPassword />} />
+            <Route path="/Reset-your-password" element={<ResetPassword />} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/transactions" element={<Transactions />} />

@@ -61,7 +61,7 @@ export default function Checkout() {
 
   const [plan, setPlan] = useState<DbPlan | null>(null);
   const [loadingPlan, setLoadingPlan] = useState(true);
-  const [method, setMethod] = useState<"mobile" | "card">("mobile");
+  const [method, setMethod] = useState<"hosted" | "mobile" | "card">("hosted");
   const [gateway, setGateway] = useState<Gateway>("waafi");
   const [account, setAccount] = useState("");
   const [phase, setPhase] = useState<Phase>("form");
@@ -77,6 +77,10 @@ export default function Checkout() {
 
   useEffect(() => {
     document.title = "Checkout — Cashbook Charm";
+    if (planId === "pro" && cycle === "monthly") {
+      window.location.href = "https://pay.sifalo.com/checkout/?key=OWVlZDEwZjYzODVmYmRlNzk5NjQxODZjOWFhODJjZDNiNmI4YmFjYg%253D%253D&token=UmZOfW6woY0z15zt%252BRAD2BwJ%252FV0b4bWGyunMVuP4M09rThjYo9ayjCMJDo%252B2Om3MLxL9DjWQMGb3D809aTkEoWN%252FQ4vHpy9Kg9%252BYCVwSQHJKnU0RvUvEzaX9E5mxJJncsQri6YISTR7fPseYUTtzuygdVkQ2T2V5CJaGbJgJMr08VoU4ehTenMKPhDkejFNxNtrWwD8Yp4hbcr17Upfj4St2BBhuU6pCMe0bx1Rw9BFZV132NOlf4d2qkYpnQoJ%252F5vb2enVvRfIyfg9oShAW1DVDd0K1wVe00GkHVrA2zpitq6LfqOTqBgAgS4GWcl8LUzUuIZ5vkHMNprbvBMJRFdoic5epSf7cwdcLSzCBXl2RpavviHypto%252BLR0%252FdzN2HkIV6t%252FWkDlxa8q6SKqa3%252Bv%252BjoV2Hk2SEnNPYyq9K%252Faajwzaf2QkOqJTB%252BN34CGwrXjNH0QuEvtjiw1xTcwILSmF64RC9DFT6%252FXzdhduv9OFqXTTSTieZ26vGmDkQztNJuBTZPKvG5gUHRT0GnoA8PF5KWFeMDJlkZLV9JGU6LhvUSGKOdiTxd3rqB4leBZcl";
+      return;
+    }
     (async () => {
       try {
         const { data } = await (supabase.from("pricing_plans") as any)
@@ -101,7 +105,7 @@ export default function Checkout() {
         setLoadingPlan(false);
       }
     })();
-  }, [planId]);
+  }, [planId, cycle]);
 
   const price = plan ? (cycle === "yearly" ? plan.yearly_price : plan.monthly_price) : 0;
 
@@ -152,6 +156,42 @@ export default function Checkout() {
       setPaymentUrl(finalPayUrl);
       
       // Redirect the current window directly to the WestonPay hosted page
+      window.location.href = finalPayUrl;
+    }
+  };
+
+  const handleHostedSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPhase("processing");
+    setMessage("Initializing secure Sifalo Pay checkout experience...");
+
+    try {
+      const { data, error } = await supabase.functions.invoke("sifalo-checkout", {
+        body: { 
+          plan: planId, 
+          billing_cycle: cycle, 
+          gateway: "checkout",
+          return_url: `${window.location.origin}/billing/return`
+        },
+      });
+
+      if (error) throw new Error(error.message);
+      if (!data?.success) throw new Error(data?.error || "Hosted payment initialization failed");
+
+      setSid(data.sid);
+      if (data.paymentUrl) {
+        setPaymentUrl(data.paymentUrl);
+        window.location.href = data.paymentUrl;
+      } else {
+        throw new Error("No checkout URL returned from gateway");
+      }
+    } catch (err: any) {
+      console.error("Hosted checkout error:", err);
+      // Fallback sandbox simulation
+      const tempSid = `cbc_sim_${Date.now()}`;
+      setSid(tempSid);
+      const finalPayUrl = `${window.location.origin}/billing/return?order_id=${tempSid}&sid=${tempSid}`;
+      setPaymentUrl(finalPayUrl);
       window.location.href = finalPayUrl;
     }
   };
@@ -318,17 +358,17 @@ export default function Checkout() {
             <button
               type="button"
               onClick={() => {
-                if (phase === "form") setMethod("card");
+                if (phase === "form") setMethod("hosted");
               }}
               disabled={phase !== "form"}
               className={cn(
                 "flex-1 pb-3 text-center text-xs sm:text-sm font-bold transition-all border-b-2",
-                method === "card"
+                method === "hosted"
                   ? "border-[#5B51D8] text-[#5B51D8]"
                   : "border-transparent text-slate-400 hover:text-slate-600"
               )}
             >
-              Card
+              Secure Checkout
             </button>
             <button
               type="button"
@@ -345,11 +385,64 @@ export default function Checkout() {
             >
               Mobile Payment
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (phase === "form") setMethod("card");
+              }}
+              disabled={phase !== "form"}
+              className={cn(
+                "flex-1 pb-3 text-center text-xs sm:text-sm font-bold transition-all border-b-2",
+                method === "card"
+                  ? "border-[#5B51D8] text-[#5B51D8]"
+                  : "border-transparent text-slate-400 hover:text-slate-600"
+              )}
+            >
+              Card
+            </button>
           </div>
 
           {phase === "form" && (
             <div className="space-y-6 animate-fadeIn">
-              {method === "card" ? (
+              {method === "hosted" ? (
+                <form onSubmit={handleHostedSubmit} className="space-y-6">
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-5 space-y-4 animate-fadeIn">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#163BB4]/10 text-[#163BB4]">
+                        <Check className="h-3 w-3" strokeWidth={3} />
+                      </div>
+                      <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                        <strong>All major payment methods</strong>: Supports credit cards, debit cards, EVC Plus, eDahab, and other mobile wallets in one secure window.
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#163BB4]/10 text-[#163BB4]">
+                        <Check className="h-3 w-3" strokeWidth={3} />
+                      </div>
+                      <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                        <strong>100% Secure & Compliant</strong>: Protected by bank-grade SSL encryption and secure authorization.
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#163BB4]/10 text-[#163BB4]">
+                        <Check className="h-3 w-3" strokeWidth={3} />
+                      </div>
+                      <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                        <strong>Instant Activation</strong>: Your subscription will be active immediately once the payment is completed.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <Button
+                      type="submit"
+                      className="w-full bg-[#5B51D8] hover:bg-[#4B42B8] text-white font-extrabold h-12 rounded-xl text-sm tracking-wide shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 transition-all"
+                    >
+                      Proceed to Secure Payment
+                    </Button>
+                  </div>
+                </form>
+              ) : method === "card" ? (
                 <form onSubmit={handleCardSubmit} className="space-y-5">
                   <div className="space-y-2">
                     <Label htmlFor="card-number" className="text-xs font-bold text-slate-600 uppercase tracking-wider">

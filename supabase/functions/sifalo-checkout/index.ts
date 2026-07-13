@@ -25,7 +25,7 @@ try {
   console.error("Failed to initialize admin Supabase client at top level", e);
 }
 
-const ALLOWED_GATEWAYS = ["waafi", "edahab", "pbwallet"] as const;
+const ALLOWED_GATEWAYS = ["waafi", "edahab", "pbwallet", "checkout"] as const;
 
 const j = (b: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(b), {
@@ -67,6 +67,7 @@ Deno.serve(async (req) => {
     billing_cycle?: "monthly" | "yearly";
     account?: string;
     gateway?: string;
+    return_url?: string;
   };
   try {
     body = await req.json();
@@ -78,9 +79,12 @@ Deno.serve(async (req) => {
   const cycle = body.billing_cycle === "yearly" ? "yearly" : "monthly";
   const account = String(body.account ?? "").replace(/[^0-9+]/g, "");
   const gateway = String(body.gateway ?? "").toLowerCase();
+  const isHostedCheckout = gateway === "checkout";
 
   if (!["pro", "team"].includes(plan)) return j({ success: false, error: "Invalid plan" });
-  if (!account || account.length < 7) return j({ success: false, error: "Invalid mobile number" });
+  if (!isHostedCheckout && (!account || account.length < 7)) {
+    return j({ success: false, error: "Invalid mobile number" });
+  }
   if (!(ALLOWED_GATEWAYS as readonly string[]).includes(gateway)) {
     return j({ success: false, error: "Invalid gateway" });
   }
@@ -121,7 +125,7 @@ Deno.serve(async (req) => {
       billing_cycle: cycle,
       status: "pending",
       sid: orderId,
-      customer_account: account,
+      customer_account: account || "hosted_checkout",
       payment_gateway: gateway,
       amount,
       start_date: new Date().toISOString(),
@@ -179,15 +183,18 @@ Deno.serve(async (req) => {
       }
     };
 
-    const payload = {
-      account,
+    const returnUrlFromClient = body.return_url || "https://cashbookcharm.com/billing/return";
+    const separator = returnUrlFromClient.includes("?") ? "&" : "?";
+    const finalReturnUrl = `${returnUrlFromClient}${separator}order_id=${orderId}`;
+
+    const payload: Record<string, any> = {
       gateway,
       amount: String(amount),
       currency: "USD",
-      order_id: orderId,
+      ...(isHostedCheckout ? { return_url: finalReturnUrl } : { account, order_id: orderId }),
       ...(SIFALO_ACCOUNT ? { merchant_account: SIFALO_ACCOUNT } : {}),
     };
-    console.log("[sifalo-checkout] request", { orderId, plan, cycle, gateway, account });
+    console.log("[sifalo-checkout] request", { orderId, plan, cycle, gateway, isHostedCheckout });
 
     let sifaloData: Record<string, unknown> = {};
     let sifaloStatus = 0;
@@ -209,13 +216,35 @@ Deno.serve(async (req) => {
       console.warn("[sifalo-checkout] Sifalo API unreachable. Falling back to sandbox simulation mode.");
       const simSid = `cbc_sim_${userId.slice(0, 8)}_${plan}_${cycle}_${Date.now()}`;
       await safeUpdateStatus(insertedId, "pending", { sid: simSid });
+      
+      let fallbackPayUrl = `https://pay.westonpay.com/checkout/pay/${simSid}`;
+      if (isHostedCheckout) {
+        fallbackPayUrl = `${returnUrlFromClient}${separator}order_id=${orderId}&sid=${simSid}`;
+      }
+      
       return j({
         success: true,
         sid: simSid,
         code: "603",
-        paymentUrl: `https://pay.westonpay.com/checkout/pay/${simSid}`,
+        paymentUrl: fallbackPayUrl,
         status: "pending",
         message: "Payment pending confirmation (Sandbox fallback).",
+      });
+    }
+
+    if (isHostedCheckout && (sifaloData.key || sifaloData.token)) {
+      const key = String(sifaloData.key ?? "");
+      const token = String(sifaloData.token ?? "");
+      const checkoutUrl = `https://pay.sifalo.com/checkout/?key=${encodeURIComponent(key)}&token=${encodeURIComponent(token)}`;
+      await safeUpdateStatus(insertedId, "pending", { sid: orderId });
+      console.log("[sifalo-checkout] hosted checkout redirect created:", checkoutUrl);
+      return j({
+        success: true,
+        sid: orderId,
+        code: "603",
+        paymentUrl: checkoutUrl,
+        status: "pending",
+        message: "Redirecting to Sifalo Pay secure hosted checkout...",
       });
     }
 

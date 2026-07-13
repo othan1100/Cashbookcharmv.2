@@ -1,23 +1,38 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Loader2, CheckCircle2, XCircle, ArrowRight, ShieldCheck, BadgeCheck } from "lucide-react";
+import { Loader2, XCircle, ArrowRight, ShieldCheck, BadgeCheck, ReceiptText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/SectionCard";
+import { toast } from "@/hooks/use-toast";
+
+interface TransactionDetails {
+  code: string;
+  status: string;
+  paymentType: string;
+  amount?: string;
+  sid: string;
+}
 
 export default function BillingReturn() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   const [message, setMessage] = useState("");
-  const [countdown, setCountdown] = useState(5);
   const [activePlan, setActivePlan] = useState("");
+  const [txnDetails, setTxnDetails] = useState<TransactionDetails | null>(null);
 
   useEffect(() => {
-    const sid = params.get("sid") ?? params.get("order_id") ?? params.get("id");
-    if (!sid) { 
+    const sid = params.get("sid") ?? params.get("id") ?? "";
+    const orderId = params.get("order_id") ?? "";
+    if (!sid && !orderId) { 
       setState("error"); 
-      setMessage("Missing payment reference (SID). Please contact support if you believe this is an error."); 
+      setMessage("Missing payment reference (SID/Order ID). Please contact support if you believe this is an error."); 
+      toast({
+        title: "Invalid Payment Reference",
+        description: "Missing payment reference (SID/Order ID). Please contact support if you believe this is an error.",
+        variant: "destructive",
+      });
       return; 
     }
     
@@ -25,12 +40,33 @@ export default function BillingReturn() {
     
     (async () => {
       try {
-        const { data, error } = await supabase.functions.invoke("sifalo-verify", { body: { sid } });
+        const { data, error } = await supabase.functions.invoke("sifalo-verify", { 
+          body: { 
+            sid: sid || undefined,
+            order_id: orderId || undefined
+          } 
+        });
         if (!isMounted) return;
         
         if (error || !data?.ok) {
           setState("error");
-          setMessage(data?.error ?? error?.message ?? "Payment verification failed or timed out.");
+          const errorMsg = data?.error ?? error?.message ?? "Payment verification failed or timed out.";
+          setMessage(errorMsg);
+          
+          const codeVal = data?.code || "602";
+          setTxnDetails({
+            code: codeVal,
+            status: data?.status || "failed/pending",
+            paymentType: data?.payment_type || "Sifalo Pay Checkout",
+            amount: data?.amount,
+            sid: data?.sid || sid || orderId
+          });
+
+          toast({
+            title: "Payment Failed / Pending",
+            description: `${errorMsg} (Sifalo Code: ${codeVal})`,
+            variant: "destructive",
+          });
           return;
         }
         
@@ -38,10 +74,38 @@ export default function BillingReturn() {
         const planName = String(data.plan || "Pro").toUpperCase();
         setActivePlan(planName);
         setMessage(`Your account has been successfully upgraded to the ${planName} plan.`);
+        
+        const codeVal = data.code || "601";
+        setTxnDetails({
+          code: codeVal,
+          status: data.status || "success",
+          paymentType: data.payment_type || "Sifalo Pay Checkout",
+          amount: data.amount,
+          sid: data.sid || sid || orderId
+        });
+
+        toast({
+          title: "Payment Successful",
+          description: `Transaction verified! Sifalo Code: ${codeVal}. Plan upgraded to ${planName}.`,
+        });
       } catch (err: any) {
         if (!isMounted) return;
         setState("error");
-        setMessage(err.message || "An unexpected error occurred during verification.");
+        const errMsg = err.message || "An unexpected error occurred during verification.";
+        setMessage(errMsg);
+        
+        setTxnDetails({
+          code: "500",
+          status: "internal error",
+          paymentType: "System Gateway",
+          sid: sid || orderId
+        });
+
+        toast({
+          title: "Verification Error",
+          description: errMsg,
+          variant: "destructive",
+        });
       }
     })();
 
@@ -97,7 +161,48 @@ export default function BillingReturn() {
                 {message} All premium limits and business features have been unlocked immediately.
               </p>
 
-              <div className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-[11px] text-slate-500 font-medium">
+              {txnDetails && (
+                <div className="w-full text-left border border-slate-100 bg-slate-50/70 rounded-2xl p-4 space-y-3">
+                  <div className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400 border-b border-slate-100/80 pb-2 flex justify-between items-center">
+                    <span className="flex items-center gap-1"><ReceiptText className="h-3.5 w-3.5 text-slate-400" /> Payment Receipt</span>
+                    <span className="text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full font-black">
+                      Code {txnDetails.code}
+                    </span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-tight">Transaction ID</span>
+                      <span className="font-mono text-[11px] font-semibold text-slate-700 bg-slate-100/80 px-1.5 py-0.5 rounded break-all inline-block select-all">
+                        {txnDetails.sid}
+                      </span>
+                    </div>
+                    
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-tight">Status</span>
+                      <span className="font-bold text-emerald-600">
+                        {txnDetails.status.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-tight">Gateway</span>
+                      <span className="font-medium text-slate-700">
+                        {txnDetails.paymentType}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-tight">Amount Paid</span>
+                      <span className="font-extrabold text-slate-800">
+                        {txnDetails.amount ? `$${txnDetails.amount} USD` : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="w-full bg-slate-50 border border-slate-150 p-3 rounded-xl text-[11px] text-slate-500 font-medium">
                 Your payment is fully verified. Click below to explore your new premium features.
               </div>
 
@@ -121,6 +226,47 @@ export default function BillingReturn() {
               <p className="text-xs text-slate-500 leading-relaxed max-w-sm px-2">
                 {message}
               </p>
+
+              {txnDetails && (
+                <div className="w-full text-left border border-slate-100 bg-rose-50/30 rounded-2xl p-4 space-y-3">
+                  <div className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400 border-b border-rose-100/40 pb-2 flex justify-between items-center">
+                    <span className="flex items-center gap-1"><ReceiptText className="h-3.5 w-3.5 text-slate-400" /> Transaction Error</span>
+                    <span className="text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-full font-black">
+                      Code {txnDetails.code}
+                    </span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-tight">Reference ID</span>
+                      <span className="font-mono text-[11px] font-semibold text-slate-700 bg-slate-100/80 px-1.5 py-0.5 rounded break-all inline-block select-all">
+                        {txnDetails.sid}
+                      </span>
+                    </div>
+                    
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-tight">Gateway Status</span>
+                      <span className="font-bold text-rose-600">
+                        {txnDetails.status.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-tight">Gateway</span>
+                      <span className="font-medium text-slate-700">
+                        {txnDetails.paymentType}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-tight">Target Amount</span>
+                      <span className="font-extrabold text-slate-800">
+                        {txnDetails.amount ? `$${txnDetails.amount} USD` : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="flex flex-col sm:flex-row gap-3 w-full pt-2">
                 <Button 
@@ -148,4 +294,3 @@ export default function BillingReturn() {
     </div>
   );
 }
-
