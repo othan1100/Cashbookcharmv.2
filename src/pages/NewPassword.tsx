@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BookOpen, Loader2, Eye, EyeOff, CheckCircle2, AlertTriangle, ArrowRight, Mail, Sparkles, Sun, Moon, User, Lock, Check, X } from "lucide-react";
+import { BookOpen, Loader2, Eye, EyeOff, CheckCircle2, AlertTriangle, ArrowRight, Lock, Check, X, Sun, Moon, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useTheme } from "@/hooks/useTheme";
 import { Button } from "@/components/ui/button";
@@ -8,63 +8,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 
-function decodeJwt(token: string) {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const base64Url = parts[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = decodeURIComponent(
-      window.atob(base64)
-        .split('')
-        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
-    );
-    return JSON.parse(jsonPayload);
-  } catch (e) {
-    console.error("Failed to decode JWT:", e);
-    return null;
-  }
-}
-
 export default function NewPassword() {
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
   
-  const [ready, setReady] = useState(true);
+  // Loading & Action states
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [countdown, setCountdown] = useState(3);
 
-  // URL Hash Parsing for token authentication
-  const hash = window.location.hash || "";
-  const search = window.location.search || "";
-  const params = new URLSearchParams(hash.replace("#", "?") || search);
-  const hasAccessToken = 
-    params.has("access_token") || 
-    params.has("refresh_token") || 
-    params.has("code") ||
-    params.get("type") === "recovery" ||
-    hash.includes("type=recovery") ||
-    search.includes("type=recovery") ||
-    hash.includes("access_token") ||
-    search.includes("code=");
-
-  // Form Fields initialized from JWT if available
-  const [email, setEmail] = useState(() => {
-    try {
-      const accessToken = params.get("access_token");
-      if (accessToken) {
-        const payload = decodeJwt(accessToken);
-        if (payload?.email) return payload.email;
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return "";
-  });
-
+  // Form Fields (exactly two as requested)
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   
@@ -84,41 +39,60 @@ export default function NewPassword() {
   }, []);
 
   useEffect(() => {
-    // 1. Check for token expiration error in URL
-    const errorDescription = params.get("error_description") || params.get("error");
-    if (errorDescription) {
-      setErrorMsg("The password reset link is invalid or has expired. Please request a new one.");
-      return;
-    }
+    const checkSession = async () => {
+      setLoading(true);
+      setErrorMsg("");
 
-    // 2. Load the user's information from current session
-    const loadUserInfo = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        if (!email) setEmail(session.user.email || "");
+      // 1. Check for token/recovery error in current URL parameters
+      const hash = window.location.hash || "";
+      const search = window.location.search || "";
+      const params = new URLSearchParams(hash.replace("#", "?") || search);
+      const errorDescription = params.get("error_description") || params.get("error");
+      
+      if (errorDescription) {
+        setErrorMsg("The password recovery link is invalid or has expired. Please request a new one.");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        // 2. Read the recovery session from Supabase Auth
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error("Error fetching session:", error);
+          setErrorMsg("Could not verify your recovery session. Please try again.");
+        } else if (!session) {
+          // If no session but hash exists, wait a short moment for auth state change
+          console.log("No active session found on initial load.");
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
       }
     };
-    
-    loadUserInfo();
+
+    checkSession();
 
     // Listen to changes to detect password recovery session
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
-        if (!email) setEmail(session.user.email || "");
+      if (session) {
+        console.log("Auth session detected on state change:", event);
+        setLoading(false);
       }
     });
 
     return () => {
       sub.subscription.unsubscribe();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasAccessToken]);
+  }, []);
 
-  // Handle auto redirect to dashboard /
+  // Handle countdown and auto redirect to /login
   useEffect(() => {
     if (!success) return;
     if (countdown <= 0) {
-      navigate("/");
+      navigate("/login");
       return;
     }
     const interval = setInterval(() => {
@@ -127,7 +101,7 @@ export default function NewPassword() {
     return () => clearInterval(interval);
   }, [success, countdown, navigate]);
 
-  const handleSaveNewPassword = async (e: React.FormEvent) => {
+  const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
 
@@ -144,7 +118,7 @@ export default function NewPassword() {
     setBusy(true);
 
     try {
-      // 1. Update Password in Supabase Auth
+      // Use supabase.auth.updateUser({ password: newPassword })
       const { error: updateError } = await supabase.auth.updateUser({
         password: password
       });
@@ -160,18 +134,21 @@ export default function NewPassword() {
         return;
       }
 
+      // Explicitly sign out to clean up recovery session before redirecting to login
+      await supabase.auth.signOut();
+
       setBusy(false);
       setSuccess(true);
       toast({
-        title: "Password Updated Successfully!",
-        description: "You have been logged in automatically.",
+        title: "Password Updated!",
+        description: "Your password has been changed successfully.",
       });
     } catch (err: any) {
       setBusy(false);
       setErrorMsg("An unexpected error occurred. Please try again.");
       toast({
         title: "Error",
-        description: err.message || "An error occurred while saving.",
+        description: err.message || "An error occurred while updating.",
         variant: "destructive"
       });
     }
@@ -208,24 +185,24 @@ export default function NewPassword() {
 
         <div className="rounded-3xl border border-border bg-card/95 p-6 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-[#0B1B3D]/80 dark:shadow-[0_20px_60px_-15px_rgba(59,130,246,0.5)] sm:p-8 animate-fadeIn duration-500">
           
-          {/* Main Logo & Header */}
+          {/* Header */}
           <div className="text-center">
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#1D4ED8] to-[#3B82F6] text-white shadow-lg shadow-[#3B82F6]/40">
               <BookOpen className="h-7 w-7" strokeWidth={2.5} />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground dark:text-white">Create New Password</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground dark:text-white font-sans">Create New Password</h1>
             <p className="mt-1 text-sm text-muted-foreground dark:text-white/60">
-              Please enter your details to set your secure password.
+              Please enter your new secure password below.
             </p>
           </div>
 
-          {!ready ? (
-            <div className="mt-8 flex flex-col items-center gap-3 text-muted-foreground dark:text-white/60 py-6">
+          {loading ? (
+            <div className="mt-8 flex flex-col items-center gap-3 text-muted-foreground dark:text-white/60 py-8">
               <Loader2 className="h-6 w-6 animate-spin text-primary dark:text-[#60A5FA]" />
-              <p className="text-sm font-medium">Validating recovery request...</p>
+              <p className="text-sm font-medium">Reading recovery session...</p>
             </div>
           ) : success ? (
-            /* ================= SUCCESS REDIRECT STATE ================= */
+            /* ================= SUCCESS STATE ================= */
             <div className="mt-6 text-center space-y-6 animate-fadeIn">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                 <CheckCircle2 className="h-6 w-6 animate-pulse" />
@@ -234,23 +211,23 @@ export default function NewPassword() {
               <div className="space-y-2">
                 <h2 className="text-lg font-bold text-foreground dark:text-white font-sans">Password updated!</h2>
                 <p className="text-sm text-muted-foreground dark:text-white/60 leading-relaxed px-2">
-                  Your new password has been saved. You are being logged in automatically.
+                  Your new password has been saved. Please sign in again using your new credentials.
                 </p>
                 <p className="text-xs text-muted-foreground/60 dark:text-white/40">
-                  Redirecting to your dashboard in <span className="font-bold text-primary dark:text-[#60A5FA]">{countdown}s</span>...
+                  Redirecting to the login screen in <span className="font-bold text-primary dark:text-[#60A5FA]">{countdown}s</span>...
                 </p>
               </div>
 
               <Button 
-                onClick={() => navigate("/")} 
+                onClick={() => navigate("/login")} 
                 className="w-full h-11 rounded-xl bg-gradient-to-br from-[#1D4ED8] to-[#3B82F6] border-0 text-white font-semibold flex items-center justify-center gap-2 hover:opacity-90 shadow-lg shadow-[#3B82F6]/20"
               >
-                Go to Dashboard <ArrowRight className="h-4 w-4" />
+                Go to Sign In <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
           ) : (
-            /* ================= CREATE PASSWORD FORM ================= */
-            <form onSubmit={handleSaveNewPassword} className="mt-6 space-y-4">
+            /* ================= FORM STATE (Exactly Two Inputs) ================= */
+            <form onSubmit={handleUpdatePassword} className="mt-6 space-y-4">
               {errorMsg && (
                 <div className="flex items-start gap-2.5 p-3.5 rounded-xl border border-rose-500/20 bg-rose-500/10 text-rose-600 dark:text-rose-200 text-xs leading-relaxed animate-fadeIn">
                   <AlertTriangle className="h-4 w-4 shrink-0 text-rose-500 dark:text-rose-400 mt-0.5" />
@@ -258,25 +235,7 @@ export default function NewPassword() {
                 </div>
               )}
 
-              {/* Email (Read Only) */}
-              <div className="space-y-1.5">
-                <Label htmlFor="email" className="text-foreground/80 dark:text-white/80 font-medium text-xs">Email Address</Label>
-                <div className="relative">
-                  <Input 
-                    id="email"
-                    type="email" 
-                    required 
-                    placeholder="your-email@example.com"
-                    value={email} 
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="border-input bg-background/50 text-foreground placeholder:text-muted-foreground/50 dark:border-white/10 dark:bg-white/5 dark:text-white pl-10 h-10 rounded-xl focus-visible:ring-1 focus-visible:ring-[#3B82F6] opacity-80 cursor-not-allowed" 
-                    readOnly
-                  />
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60 dark:text-white/40" />
-                </div>
-              </div>
-
-              {/* New Password Field */}
+              {/* 1. New Password Input */}
               <div className="space-y-1.5">
                 <Label htmlFor="pass" className="text-foreground/80 dark:text-white/80 font-medium text-xs">New Password</Label>
                 <div className="relative">
@@ -301,7 +260,7 @@ export default function NewPassword() {
                 </div>
               </div>
 
-              {/* Confirm Password Field */}
+              {/* 2. Confirm Password Input */}
               <div className="space-y-1.5">
                 <Label htmlFor="confirmPass" className="text-foreground/80 dark:text-white/80 font-medium text-xs">Confirm New Password</Label>
                 <div className="relative">
@@ -354,7 +313,7 @@ export default function NewPassword() {
                     ) : (
                       <X className="h-3.5 w-3.5 text-rose-500 stroke-[3]" />
                     )}
-                    <span className={hasNumberOrSpec ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-muted-foreground dark:text-white/60"}>One number/special character</span>
+                    <span className={hasNumberOrSpec ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-muted-foreground dark:text-white/60"}>One number/spec char</span>
                   </div>
 
                   <div className="flex items-center gap-1.5">
@@ -368,7 +327,7 @@ export default function NewPassword() {
                 </div>
               </div>
 
-              {/* Save Button */}
+              {/* Update Password Button */}
               <Button 
                 type="submit" 
                 disabled={busy} 
