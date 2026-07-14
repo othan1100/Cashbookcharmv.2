@@ -171,7 +171,7 @@ export default function Checkout() {
           plan: planId, 
           billing_cycle: cycle, 
           gateway: "checkout",
-          return_url: `${window.location.origin}/billing/return`
+          return_url: `${window.location.origin}/payment-success`
         },
       });
 
@@ -190,7 +190,7 @@ export default function Checkout() {
       // Fallback sandbox simulation
       const tempSid = `cbc_sim_${Date.now()}`;
       setSid(tempSid);
-      const finalPayUrl = `${window.location.origin}/billing/return?order_id=${tempSid}&sid=${tempSid}`;
+      const finalPayUrl = `${window.location.origin}/payment-success?order_id=${tempSid}&sid=${tempSid}`;
       setPaymentUrl(finalPayUrl);
       window.location.href = finalPayUrl;
     }
@@ -277,7 +277,7 @@ export default function Checkout() {
     setPhase("processing");
     setMessage("Simulating successful payment and return...");
     setTimeout(() => {
-      navigate(`/billing/return?sid=${sid || "mock_sid"}`);
+      navigate(`/payment-success?sid=${sid || "mock_sid"}`);
     }, 1500);
   };
 

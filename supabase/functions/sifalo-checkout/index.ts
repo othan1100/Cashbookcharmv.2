@@ -1,7 +1,7 @@
 // Sifalo Pay — direct mobile wallet checkout.
 // Accepts { plan, billing_cycle, account, gateway } and creates a pending
 // subscription, then invokes the Sifalo gateway API to trigger a wallet push.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

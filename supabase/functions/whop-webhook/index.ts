@@ -1,6 +1,6 @@
 // Whop webhook handler — auto-upgrades user plans on successful payments.
 // Public endpoint (no JWT). Verifies HMAC signature using WHOP_WEBHOOK_SECRET.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

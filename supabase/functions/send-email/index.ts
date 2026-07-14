@@ -1,7 +1,10 @@
 // Generic Resend email sender — used for feedback notifications, welcome emails,
 // password reset notifications, etc. Auth emails (signup verification, password
 // reset links) are still handled by Supabase Auth itself.
-import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const DEFAULT_FROM = "Cashbook Charm <cashbookcharm@resend.dev>";

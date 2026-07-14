@@ -1,6 +1,6 @@
 // Verifies a Sifalo Pay SID and activates the matching subscription.
 // Idempotent — repeated calls for the same SID won't re-activate.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

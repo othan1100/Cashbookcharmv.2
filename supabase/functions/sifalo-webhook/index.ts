@@ -1,7 +1,7 @@
 // Sifalo Pay webhook — auto-upgrades user plans on successful payments.
 // Public endpoint (no JWT). Verifies HMAC SHA-256 signature against SIFALO_API_KEY
 // (or override with a dedicated SIFALO_WEBHOOK_SECRET if provided).
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
