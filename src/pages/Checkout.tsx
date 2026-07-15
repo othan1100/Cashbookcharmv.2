@@ -69,18 +69,8 @@ export default function Checkout() {
   const [sid, setSid] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string>("");
 
-  // Credit Card fields
-  const [cardNumber, setCardNumber] = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
-  const [cardCvv, setCardCvv] = useState("");
-  const [cardName, setCardName] = useState("");
-
   useEffect(() => {
     document.title = "Checkout — Cashbook Charm";
-    if (planId === "pro" && cycle === "monthly") {
-      window.location.href = "https://pay.sifalo.com/checkout/?key=OWVlZDEwZjYzODVmYmRlNzk5NjQxODZjOWFhODJjZDNiNmI4YmFjYg%253D%253D&token=UmZOfW6woY0z15zt%252BRAD2BwJ%252FV0b4bWGyunMVuP4M09rThjYo9ayjCMJDo%252B2Om3MLxL9DjWQMGb3D809aTkEoWN%252FQ4vHpy9Kg9%252BYCVwSQHJKnU0RvUvEzaX9E5mxJJncsQri6YISTR7fPseYUTtzuygdVkQ2T2V5CJaGbJgJMr08VoU4ehTenMKPhDkejFNxNtrWwD8Yp4hbcr17Upfj4St2BBhuU6pCMe0bx1Rw9BFZV132NOlf4d2qkYpnQoJ%252F5vb2enVvRfIyfg9oShAW1DVDd0K1wVe00GkHVrA2zpitq6LfqOTqBgAgS4GWcl8LUzUuIZ5vkHMNprbvBMJRFdoic5epSf7cwdcLSzCBXl2RpavviHypto%252BLR0%252FdzN2HkIV6t%252FWkDlxa8q6SKqa3%252Bv%252BjoV2Hk2SEnNPYyq9K%252Faajwzaf2QkOqJTB%252BN34CGwrXjNH0QuEvtjiw1xTcwILSmF64RC9DFT6%252FXzdhduv9OFqXTTSTieZ26vGmDkQztNJuBTZPKvG5gUHRT0GnoA8PF5KWFeMDJlkZLV9JGU6LhvUSGKOdiTxd3rqB4leBZcl";
-      return;
-    }
     (async () => {
       try {
         const { data } = await (supabase.from("pricing_plans") as any)
@@ -94,11 +84,10 @@ export default function Checkout() {
             features: Array.isArray(data.features) ? data.features : [],
           });
         } else {
-          // Fallback to default plans
           const fallback = DEFAULT_PLANS.find((p) => p.id === planId) ?? DEFAULT_PLANS[0];
           setPlan(fallback);
         }
-      } catch (err) {
+      } catch {
         const fallback = DEFAULT_PLANS.find((p) => p.id === planId) ?? DEFAULT_PLANS[0];
         setPlan(fallback);
       } finally {
@@ -108,6 +97,15 @@ export default function Checkout() {
   }, [planId, cycle]);
 
   const price = plan ? (cycle === "yearly" ? plan.yearly_price : plan.monthly_price) : 0;
+
+  const invokeCheckout = async (payload: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke("sifalo-checkout", {
+      body: payload,
+    });
+    if (error) throw new Error(error.message);
+    if (!data?.success) throw new Error(data?.error || "Payment request failed");
+    return data;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,38 +123,44 @@ export default function Checkout() {
     setMessage("Initializing Sifalo Pay secure wallet payment...");
 
     try {
-      const { data, error } = await supabase.functions.invoke("sifalo-checkout", {
-        body: { plan: planId, billing_cycle: cycle, account: cleaned, gateway },
+      const data = await invokeCheckout({
+        plan: planId,
+        billing_cycle: cycle,
+        account: cleaned,
+        gateway,
+        return_url: `${window.location.origin}/payment-success`,
       });
 
-      if (error) throw new Error(error.message);
-      if (!data?.success) throw new Error(data?.error || "Payment request failed");
-
       setSid(data.sid);
-      let finalPayUrl = "";
-      if (data.paymentUrl) {
-        // Direct to official WestonPay checkout gateways (replacing older/expired sifalopay.com and pay.sifalo.com domains)
-        finalPayUrl = data.paymentUrl
-          .replace("sifalopay.com", "pay.westonpay.com")
-          .replace("pay.sifalo.com", "pay.westonpay.com")
-          .replace("sifalo.com", "westonpay.com");
-      } else {
-        finalPayUrl = `https://pay.westonpay.com/checkout/pay/${data.sid}`;
-      }
-      setPaymentUrl(finalPayUrl);
 
-      // Redirect the current window directly to the WestonPay hosted page
-      window.location.href = finalPayUrl;
-    } catch (err) {
-      console.error("Checkout error:", err);
-      // Fallback sandbox support for premium developer experience
-      const tempSid = `cbc_sim_${Date.now()}`;
-      setSid(tempSid);
-      const finalPayUrl = `https://pay.westonpay.com/checkout/pay/${tempSid}`;
+      if (data.code === "601") {
+        // Payment completed immediately (e.g. auto-approved)
+        setPhase("success");
+        setMessage(`Success! Your ${plan?.name} subscription is now active.`);
+        toast({ title: "Payment Completed", description: "Your account is upgraded!" });
+        setTimeout(() => navigate(`/payment-success?sid=${data.sid}`), 2000);
+        return;
+      }
+
+      // 603 = pending — user needs to approve on phone or visit payment URL
+      let finalPayUrl = data.paymentUrl || "";
       setPaymentUrl(finalPayUrl);
-      
-      // Redirect the current window directly to the WestonPay hosted page
-      window.location.href = finalPayUrl;
+      setPhase("pending");
+      setMessage(data.message || "Payment pending confirmation. Please approve the prompt on your phone.");
+
+      if (finalPayUrl) {
+        // Open payment page in new tab so user can complete
+        window.open(finalPayUrl, "_blank");
+      }
+    } catch (err: any) {
+      console.error("Checkout error:", err);
+      setPhase("error");
+      setMessage(err?.message || "Payment request failed. Please try again.");
+      toast({
+        title: "Payment Failed",
+        description: err?.message || "Payment request failed.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -166,17 +170,47 @@ export default function Checkout() {
     setMessage("Initializing secure Sifalo Pay checkout experience...");
 
     try {
-      const { data, error } = await supabase.functions.invoke("sifalo-checkout", {
-        body: { 
-          plan: planId, 
-          billing_cycle: cycle, 
-          gateway: "checkout",
-          return_url: `${window.location.origin}/payment-success`
-        },
+      const data = await invokeCheckout({
+        plan: planId,
+        billing_cycle: cycle,
+        gateway: "checkout",
+        return_url: `${window.location.origin}/payment-success`,
       });
 
-      if (error) throw new Error(error.message);
-      if (!data?.success) throw new Error(data?.error || "Hosted payment initialization failed");
+      setSid(data.sid);
+
+      if (data.paymentUrl) {
+        setPaymentUrl(data.paymentUrl);
+        // Redirect to Sifalo hosted checkout — user pays there, then returns to /payment-success
+        window.location.href = data.paymentUrl;
+      } else {
+        throw new Error("No checkout URL returned from gateway");
+      }
+    } catch (err: any) {
+      console.error("Hosted checkout error:", err);
+      setPhase("error");
+      setMessage(err?.message || "Hosted payment initialization failed.");
+      toast({
+        title: "Checkout Failed",
+        description: err?.message || "Failed to initialize checkout.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCardSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // Card payments go through hosted checkout (Sifalo handles card input securely)
+    setPhase("processing");
+    setMessage("Redirecting to secure card payment via Sifalo Pay...");
+
+    try {
+      const data = await invokeCheckout({
+        plan: planId,
+        billing_cycle: cycle,
+        gateway: "checkout",
+        return_url: `${window.location.origin}/payment-success`,
+      });
 
       setSid(data.sid);
       if (data.paymentUrl) {
@@ -186,65 +220,13 @@ export default function Checkout() {
         throw new Error("No checkout URL returned from gateway");
       }
     } catch (err: any) {
-      console.error("Hosted checkout error:", err);
-      // Fallback sandbox simulation
-      const tempSid = `cbc_sim_${Date.now()}`;
-      setSid(tempSid);
-      const finalPayUrl = `${window.location.origin}/payment-success?order_id=${tempSid}&sid=${tempSid}`;
-      setPaymentUrl(finalPayUrl);
-      window.location.href = finalPayUrl;
-    }
-  };
-
-  const handleCardSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanNum = cardNumber.replace(/\s/g, "");
-    if (cleanNum.length < 15) {
-      toast({ title: "Validation Error", description: "Please enter a valid credit card number.", variant: "destructive" });
-      return;
-    }
-    if (!cardExpiry || cardExpiry.length < 5) {
-      toast({ title: "Validation Error", description: "Please enter a valid expiry (MM/YY).", variant: "destructive" });
-      return;
-    }
-    if (cardCvv.length < 3) {
-      toast({ title: "Validation Error", description: "Please enter a valid CVV code.", variant: "destructive" });
-      return;
-    }
-    if (!cardName || cardName.trim().length < 3) {
-      toast({ title: "Validation Error", description: "Please enter the cardholder's name.", variant: "destructive" });
-      return;
-    }
-
-    setPhase("processing");
-    setMessage("Processing credit/debit card secure transaction via Sifalo Pay...");
-
-    try {
-      // Direct user to Sifalo Pay's external gateway for card payment
-      const { data, error } = await supabase.functions.invoke("sifalo-checkout", {
-        body: { plan: planId, billing_cycle: cycle, account: "+252610000000", gateway: "waafi" },
+      setPhase("error");
+      setMessage(err?.message || "Card payment initialization failed.");
+      toast({
+        title: "Checkout Failed",
+        description: err?.message || "Failed to initialize card payment.",
+        variant: "destructive",
       });
-
-      if (error) throw new Error(error.message);
-      if (!data?.success) throw new Error(data?.error || "Payment request failed");
-
-      let finalPayUrl = "";
-      if (data.paymentUrl) {
-        finalPayUrl = data.paymentUrl
-          .replace("sifalopay.com", "pay.westonpay.com")
-          .replace("pay.sifalo.com", "pay.westonpay.com")
-          .replace("sifalo.com", "westonpay.com");
-      } else {
-        finalPayUrl = `https://pay.westonpay.com/checkout/pay/${data.sid}`;
-      }
-      
-      // Redirect current window directly to WestonPay hosted page
-      window.location.href = finalPayUrl;
-    } catch (err: any) {
-      // Sandbox fallback
-      const tempSid = `cbc_sim_${Date.now()}`;
-      const finalPayUrl = `https://pay.westonpay.com/checkout/pay/${tempSid}`;
-      window.location.href = finalPayUrl;
     }
   };
 
@@ -254,31 +236,25 @@ export default function Checkout() {
     setMessage("Verifying payment confirmation from Sifalo gateway...");
 
     try {
-      const { data } = await supabase.functions.invoke("sifalo-verify", { body: { sid } });
+      const { data, error } = await supabase.functions.invoke("sifalo-verify", { body: { sid } });
+      if (error) throw new Error(error.message);
       if (data?.ok) {
         setPhase("success");
         setMessage(`Success! Your ${plan?.name} subscription is now active.`);
         toast({ title: "Payment Completed", description: "Your account is upgraded!" });
       } else {
         setPhase("pending");
+        setMessage(data?.error || "We haven't received confirmation yet. Please make sure you approved it.");
         toast({
           title: "Still Pending",
-          description: data?.error || "We haven't received confirmation yet. Please make sure you approved it.",
+          description: data?.error || "Payment not confirmed yet.",
           variant: "destructive",
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       setPhase("error");
-      setMessage((err as Error).message || "Verification request failed.");
+      setMessage(err?.message || "Verification request failed.");
     }
-  };
-
-  const handleSimulateSuccess = async () => {
-    setPhase("processing");
-    setMessage("Simulating successful payment and return...");
-    setTimeout(() => {
-      navigate(`/payment-success?sid=${sid || "mock_sid"}`);
-    }, 1500);
   };
 
   if (loadingPlan) {
@@ -302,7 +278,7 @@ export default function Checkout() {
       </div>
 
       <div className="w-full max-w-5xl mx-auto grid gap-6 md:grid-cols-12 items-start">
-        {/* Left column - order detail summary card (light green/mint themed like screenshot) */}
+        {/* Left column - order detail summary card */}
         <div className="md:col-span-5 bg-[#EDF7ED] rounded-2xl p-6 border border-[#C8E6C9] shadow-sm flex flex-col space-y-6">
           <div className="flex items-center gap-2 text-[#2E7D32] font-semibold text-[11px] uppercase tracking-wider bg-[#DBEFDB] py-1.5 px-3 rounded-lg w-max">
             <ShieldCheck className="h-4 w-4 text-[#2E7D32]" />
@@ -316,7 +292,6 @@ export default function Checkout() {
             </p>
           </div>
 
-          {/* YOU ARE PAYING main white card box */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-[#E0E0E0]/50 flex flex-col items-center justify-center text-center py-8">
             <span className="text-[10px] font-bold text-[#4CAF50] uppercase tracking-widest">
               You are paying
@@ -327,7 +302,6 @@ export default function Checkout() {
             </div>
           </div>
 
-          {/* Paying to detail box */}
           <div className="bg-white/80 rounded-xl p-4 border border-[#C8E6C9]/40 flex items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#E8F5E9] text-[#2E7D32]">
               <BookOpen className="h-5 w-5" strokeWidth={2.5} />
@@ -338,7 +312,6 @@ export default function Checkout() {
             </div>
           </div>
 
-          {/* Powered by SifaloPay badge */}
           <div className="flex items-center justify-center pt-2">
             <div className="bg-[#DBEFDB] text-[#2E7D32] font-bold text-[10px] tracking-wider uppercase py-1.5 px-4 rounded-full border border-[#C8E6C9]/50">
               Powered by SifaloPay
@@ -346,20 +319,17 @@ export default function Checkout() {
           </div>
         </div>
 
-        {/* Right column - active forms & payment option selector (card vs mobile wallet) */}
+        {/* Right column - payment options */}
         <div className="md:col-span-7 bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6 sm:p-8 space-y-6">
           <div className="flex items-center gap-2 text-slate-800">
-            <ShieldCheck className="h-5 w-5 text-indigo-500" />
+            <ShieldCheck className="h-5 w-5 text-[#5B51D8]" />
             <h2 className="text-lg font-bold">Payment Options</h2>
           </div>
 
-          {/* Flat stylish tabs beneath payment options heading */}
           <div className="flex border-b border-slate-200">
             <button
               type="button"
-              onClick={() => {
-                if (phase === "form") setMethod("hosted");
-              }}
+              onClick={() => { if (phase === "form") setMethod("hosted"); }}
               disabled={phase !== "form"}
               className={cn(
                 "flex-1 pb-3 text-center text-xs sm:text-sm font-bold transition-all border-b-2",
@@ -372,9 +342,7 @@ export default function Checkout() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (phase === "form") setMethod("mobile");
-              }}
+              onClick={() => { if (phase === "form") setMethod("mobile"); }}
               disabled={phase !== "form"}
               className={cn(
                 "flex-1 pb-3 text-center text-xs sm:text-sm font-bold transition-all border-b-2",
@@ -387,9 +355,7 @@ export default function Checkout() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (phase === "form") setMethod("card");
-              }}
+              onClick={() => { if (phase === "form") setMethod("card"); }}
               disabled={phase !== "form"}
               className={cn(
                 "flex-1 pb-3 text-center text-xs sm:text-sm font-bold transition-all border-b-2",
@@ -408,7 +374,7 @@ export default function Checkout() {
                 <form onSubmit={handleHostedSubmit} className="space-y-6">
                   <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-5 space-y-4 animate-fadeIn">
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#163BB4]/10 text-[#163BB4]">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#5B51D8]/10 text-[#5B51D8]">
                         <Check className="h-3 w-3" strokeWidth={3} />
                       </div>
                       <p className="text-xs text-slate-600 font-medium leading-relaxed">
@@ -416,7 +382,7 @@ export default function Checkout() {
                       </p>
                     </div>
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#163BB4]/10 text-[#163BB4]">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#5B51D8]/10 text-[#5B51D8]">
                         <Check className="h-3 w-3" strokeWidth={3} />
                       </div>
                       <p className="text-xs text-slate-600 font-medium leading-relaxed">
@@ -424,7 +390,7 @@ export default function Checkout() {
                       </p>
                     </div>
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#163BB4]/10 text-[#163BB4]">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#5B51D8]/10 text-[#5B51D8]">
                         <Check className="h-3 w-3" strokeWidth={3} />
                       </div>
                       <p className="text-xs text-slate-600 font-medium leading-relaxed">
@@ -444,78 +410,17 @@ export default function Checkout() {
                 </form>
               ) : method === "card" ? (
                 <form onSubmit={handleCardSubmit} className="space-y-5">
-                  <div className="space-y-2">
-                    <Label htmlFor="card-number" className="text-xs font-bold text-slate-600 uppercase tracking-wider">
-                      Card Number
-                    </Label>
-                    <Input
-                      id="card-number"
-                      placeholder="1234 1234 1234 1234"
-                      required
-                      value={cardNumber}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/\D/g, "").slice(0, 16);
-                        const formatted = val.replace(/(\d{4})/g, "$1 ").trim();
-                        setCardNumber(formatted);
-                      }}
-                      className="h-12 rounded-xl border-slate-200 bg-slate-50 focus-visible:bg-white text-base font-medium tracking-widest text-slate-800"
-                    />
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-5">
+                    <p className="text-xs text-slate-600 font-medium leading-relaxed text-center">
+                      You will be redirected to Sifalo Pay's secure checkout page to enter your card details. We never store card information on our servers.
+                    </p>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="card-expiry" className="text-xs font-bold text-slate-600 uppercase tracking-wider">
-                        Expiration
-                      </Label>
-                      <Input
-                        id="card-expiry"
-                        placeholder="MM/YY"
-                        required
-                        value={cardExpiry}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/\D/g, "").slice(0, 4);
-                          const formatted = val.length >= 3 ? `${val.slice(0, 2)}/${val.slice(2)}` : val;
-                          setCardExpiry(formatted);
-                        }}
-                        className="h-12 rounded-xl border-slate-200 bg-slate-50 focus-visible:bg-white text-base font-semibold text-slate-800 text-center"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="card-cvv" className="text-xs font-bold text-slate-600 uppercase tracking-wider">
-                        CVC / CVV
-                      </Label>
-                      <Input
-                        id="card-cvv"
-                        type="password"
-                        placeholder="CVC"
-                        required
-                        value={cardCvv}
-                        onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                        className="h-12 rounded-xl border-slate-200 bg-slate-50 focus-visible:bg-white text-base font-semibold text-slate-800 text-center"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="card-name" className="text-xs font-bold text-slate-600 uppercase tracking-wider">
-                      Cardholder Name
-                    </Label>
-                    <Input
-                      id="card-name"
-                      placeholder="John Doe"
-                      required
-                      value={cardName}
-                      onChange={(e) => setCardName(e.target.value)}
-                      className="h-12 rounded-xl border-slate-200 bg-slate-50 focus-visible:bg-white font-medium text-slate-800"
-                    />
-                  </div>
-
-                  <div className="pt-4">
+                  <div className="pt-2">
                     <Button
                       type="submit"
                       className="w-full bg-[#5B51D8] hover:bg-[#4B42B8] text-white font-extrabold h-12 rounded-xl text-sm tracking-wide shadow-lg shadow-indigo-600/20 flex items-center justify-center transition-all"
                     >
-                      Pay
+                      Proceed to Card Payment
                     </Button>
                   </div>
                 </form>
@@ -535,7 +440,7 @@ export default function Checkout() {
                           key={g.id}
                           className={cn(
                             "flex flex-col cursor-pointer items-center justify-center gap-1 rounded-xl border border-slate-200 p-4 transition-all text-center hover:bg-slate-50",
-                            gateway === g.id && "border-indigo-500 bg-indigo-50/50 ring-1 ring-indigo-500"
+                            gateway === g.id && "border-[#5B51D8] bg-indigo-50/50 ring-1 ring-[#5B51D8]"
                           )}
                         >
                           <RadioGroupItem value={g.id} id={`gateway-${g.id}`} className="sr-only" />
@@ -569,7 +474,7 @@ export default function Checkout() {
                       type="submit"
                       className="w-full bg-[#5B51D8] hover:bg-[#4B42B8] text-white font-extrabold h-12 rounded-xl text-sm tracking-wide shadow-lg shadow-indigo-600/20 flex items-center justify-center transition-all"
                     >
-                      Pay
+                      Pay ${Number(price).toFixed(2)}
                     </Button>
                   </div>
                 </form>
@@ -584,7 +489,7 @@ export default function Checkout() {
 
           {phase === "processing" && (
             <div className="flex flex-col items-center gap-4 py-12 text-center animate-pulse">
-              <Loader2 className="h-12 w-12 animate-spin text-indigo-500" />
+              <Loader2 className="h-12 w-12 animate-spin text-[#5B51D8]" />
               <p className="text-sm font-bold text-slate-700">{message}</p>
             </div>
           )}
@@ -597,20 +502,20 @@ export default function Checkout() {
 
               {paymentUrl && (
                 <div className="w-full p-4 bg-blue-50/75 border border-blue-100 rounded-2xl text-left space-y-2 mt-2">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-[#163BB4]">
-                    <ShieldCheck className="h-4 w-4 text-[#163BB4]" />
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-[#5B51D8]">
+                    <ShieldCheck className="h-4 w-4 text-[#5B51D8]" />
                     Sifalo Pay Gateway Link
                   </div>
                   <p className="text-[11px] text-slate-500 leading-normal font-medium">
-                    Please click the gateway link below to complete the payment authorization on your mobile account:
+                    Click the gateway link below to complete the payment authorization on your mobile account:
                   </p>
                   <a
                     href={paymentUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#163BB4] hover:bg-[#0F2D94] py-3 px-4 text-xs font-extrabold text-white transition-all shadow-md shadow-blue-900/10"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#5B51D8] hover:bg-[#4B42B8] py-3 px-4 text-xs font-extrabold text-white transition-all shadow-md shadow-indigo-600/10"
                   >
-                    👉 Click Here to Pay ($ {Number(price).toFixed(2)})
+                    Click Here to Pay (${Number(price).toFixed(2)})
                   </a>
                 </div>
               )}
@@ -628,15 +533,6 @@ export default function Checkout() {
                   onClick={verifyPayment}
                 >
                   Verify Payment
-                </Button>
-              </div>
-
-              <div className="pt-6 border-t border-slate-100 w-full mt-6">
-                <p className="text-[10px] text-slate-400 font-medium mb-3">
-                  In testing/demo sandbox mode, you can instantly simulate checkout completion below.
-                </p>
-                <Button variant="secondary" size="sm" className="w-full rounded-xl font-bold bg-slate-100 hover:bg-slate-200 text-slate-700" onClick={handleSimulateSuccess}>
-                  Simulate Payment Success & Return
                 </Button>
               </div>
             </div>
@@ -663,7 +559,7 @@ export default function Checkout() {
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-rose-100 text-rose-600">
                 <XCircle className="h-8 w-8" strokeWidth={2.5} />
               </div>
-              <h3 className="text-xl font-bold text-slate-800 font-bold">Payment Failed</h3>
+              <h3 className="text-xl font-bold text-slate-800">Payment Failed</h3>
               <p className="text-xs text-slate-500 max-w-xs leading-relaxed">{message}</p>
               <div className="flex gap-3 w-full mt-6">
                 <Button
