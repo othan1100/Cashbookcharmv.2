@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import { Sparkles, Loader2, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -6,46 +7,35 @@ import { toast } from "@/hooks/use-toast";
 
 interface UpgradeButtonProps {
   className?: string;
-  onUpgrade?: () => void | Promise<void>;
   planName?: string;
+  planId?: string;
+  billingCycle?: "monthly" | "yearly";
 }
 
-export function UpgradeButton({ className, onUpgrade, planName = "Pro" }: UpgradeButtonProps) {
+export function UpgradeButton({
+  className,
+  planName = "Pro",
+  planId = "pro",
+  billingCycle = "monthly",
+}: UpgradeButtonProps) {
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-  const handleUpgrade = async () => {
+  const handleUpgrade = () => {
     if (loading) return;
     setLoading(true);
-
-    try {
-      // Execute custom upgrade callback if provided
-      if (onUpgrade) {
-        await onUpgrade();
-      } else {
-        // Default interactive feedback placeholder
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-        toast({
-          title: "Upgrade Initiated",
-          description: `You are upgrading to the premium ${planName} plan. Opening checkout page...`,
-        });
-      }
-    } catch (error) {
-      console.error("Upgrade error:", error);
-      toast({
-        title: "Upgrade Failed",
-        description: "Something went wrong. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
+    toast({
+      title: "Redirecting to checkout",
+      description: `Preparing secure Sifalo Pay checkout for the ${planName} plan...`,
+    });
+    navigate(`/checkout?plan=${planId}&cycle=${billingCycle}`);
   };
 
   return (
     <div className={cn("relative group inline-block w-full sm:w-auto", className)}>
       {/* Outer ambient glow effect */}
-      <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-600 via-indigo-500 to-violet-600 rounded-xl blur-md opacity-75 group-hover:opacity-100 transition duration-500 group-hover:duration-200" />
-      
+      <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 rounded-xl blur-md opacity-75 group-hover:opacity-100 transition duration-500 group-hover:duration-200" />
+
       <motion.button
         type="button"
         disabled={loading}
@@ -64,7 +54,7 @@ export function UpgradeButton({ className, onUpgrade, planName = "Pro" }: Upgrad
 
         {loading ? (
           <>
-            <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
+            <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
             <span className="bg-gradient-to-r from-slate-100 to-slate-300 bg-clip-text text-transparent">
               Preparing Secure Checkout...
             </span>
@@ -72,10 +62,10 @@ export function UpgradeButton({ className, onUpgrade, planName = "Pro" }: Upgrad
         ) : (
           <>
             <Sparkles className="h-4 w-4 text-amber-400 animate-pulse" />
-            <span className="bg-gradient-to-r from-white via-slate-100 to-indigo-200 bg-clip-text text-transparent tracking-tight">
+            <span className="bg-gradient-to-r from-white via-slate-100 to-blue-200 bg-clip-text text-transparent tracking-tight">
               Upgrade to {planName} Now
             </span>
-            <ArrowRight className="h-4 w-4 text-indigo-300 transition-transform duration-300 group-hover:translate-x-1" />
+            <ArrowRight className="h-4 w-4 text-blue-300 transition-transform duration-300 group-hover:translate-x-1" />
           </>
         )}
       </motion.button>

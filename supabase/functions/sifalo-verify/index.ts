@@ -1,5 +1,3 @@
-// Verifies a Sifalo Pay SID and activates the matching subscription.
-// Idempotent — repeated calls for the same SID won't re-activate.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -15,35 +13,35 @@ const SIFALO_API_KEY = Deno.env.get("SIFALO_API_KEY") || "";
 
 const SIFALO_VERIFY_URL = "https://api.sifalopay.com/gateway/verify.php";
 
-const json = (b: Record<string, unknown>) =>
+const json = (b: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(b), {
-    status: 200,
+    status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 200, headers: corsHeaders });
-  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" });
+  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
 
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer "))
-      return json({ ok: false, error: "Unauthorized" });
+      return json({ ok: false, error: "Unauthorized" }, 401);
 
     if (!SUPABASE_URL || !ANON || !SERVICE_ROLE)
-      throw new Error("Supabase env not configured");
+      return json({ ok: false, error: "Server not configured" }, 500);
     if (!SIFALO_API_KEY)
-      return json({ ok: false, error: "Sifalo API key not configured" });
+      return json({ ok: false, error: "Sifalo API key not configured" }, 500);
 
     // Authenticate user
+    const token = authHeader.replace("Bearer ", "");
     const userClient = createClient(SUPABASE_URL, ANON, {
       global: { headers: { Authorization: authHeader } },
     });
-    const token = authHeader.replace("Bearer ", "");
     const { data: authData, error: authErr } = await userClient.auth.getUser(token);
     if (authErr || !authData?.user)
-      return json({ ok: false, error: "Unauthorized" });
+      return json({ ok: false, error: "Unauthorized" }, 401);
     const userId = authData.user.id;
 
     // Parse body
@@ -51,39 +49,31 @@ Deno.serve(async (req) => {
     try {
       body = await req.json();
     } catch {
-      return json({ ok: false, error: "Invalid JSON" });
+      return json({ ok: false, error: "Invalid JSON" }, 400);
     }
 
-    const sid = String(body.sid ?? "").trim();
-    const orderId = String(body.order_id ?? "").trim();
-    if (!sid && !orderId)
-      return json({ ok: false, error: "sid or order_id required" });
+    const sidParam = String(body.sid ?? "").trim();
+    const orderIdParam = String(body.order_id ?? "").trim();
+
+    if (!sidParam && !orderIdParam)
+      return json({ ok: false, error: "sid or order_id required" }, 400);
 
     const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE);
 
     // Find subscription by sid or order_id, scoped to the authenticated user
     let sub = null;
-    const lookupKey = sid || orderId;
+    const lookupKey = sidParam || orderIdParam;
+
     const { data: foundSub } = await adminClient
       .from("subscriptions")
       .select("*")
-      .eq("sid", lookupKey)
+      .or(`sid.eq.${lookupKey},order_id.eq.${lookupKey}`)
       .eq("user_id", userId)
       .maybeSingle();
     sub = foundSub;
 
-    if (!sub && orderId && orderId !== sid) {
-      const { data: foundByOrder } = await adminClient
-        .from("subscriptions")
-        .select("*")
-        .eq("sid", orderId)
-        .eq("user_id", userId)
-        .maybeSingle();
-      sub = foundByOrder;
-    }
-
     if (!sub)
-      return json({ ok: false, error: "Subscription not found for this reference" });
+      return json({ ok: false, error: "Subscription not found for this reference" }, 404);
 
     // Already active — idempotent return
     if (sub.status === "active") {
@@ -92,24 +82,27 @@ Deno.serve(async (req) => {
         already_active: true,
         plan: sub.plan,
         expire_date: sub.expire_date,
-        code: "601",
+        code: 601,
         status: "success",
         sid: sub.sid,
+        amount: String(sub.amount ?? ""),
+        payment_type: sub.payment_type ?? "",
       });
     }
 
-    // Call Sifalo verify API
+    // Call Sifalo verify API per docs:
+    // POST https://api.sifalopay.com/gateway/verify.php
+    // Body: { sid } — if no sid, use order_id
+    const verifyBody: Record<string, string> = {};
+    if (sidParam) verifyBody.sid = sidParam;
+    else if (orderIdParam) verifyBody.order_id = orderIdParam;
+
+    console.log("[sifalo-verify] request", verifyBody);
+
+    let sifaloData: Record<string, unknown> = {};
     let verified = false;
-    let sifaloCode = "";
-    let sifaloStatus = "";
-    let sifaloPaymentType = "";
-    let sifaloAmount = "";
 
     try {
-      const verifyBody: Record<string, string> = {};
-      if (sid) verifyBody.sid = sid;
-      else if (orderId) verifyBody.order_id = orderId;
-
       const res = await fetch(SIFALO_VERIFY_URL, {
         method: "POST",
         headers: {
@@ -121,53 +114,60 @@ Deno.serve(async (req) => {
       const raw = await res.text();
       console.log("[sifalo-verify] response", res.status, raw.slice(0, 500));
 
-      let data: Record<string, unknown> = {};
       try {
-        data = JSON.parse(raw);
+        sifaloData = JSON.parse(raw);
       } catch {
-        /* non-JSON */
+        return json({
+          ok: false,
+          error: "Invalid response from payment verification gateway",
+        }, 502);
       }
-
-      const code = String(
-        (data.code as string | undefined) ??
-          (data.payment_code as string | undefined) ??
-          "",
-      );
-      const status = String(
-        (data.status as string | undefined) ??
-          (data.payment_status as string | undefined) ??
-          "",
-      ).toLowerCase();
-
-      sifaloCode = code;
-      sifaloStatus = status;
-      sifaloPaymentType = String(data.payment_type ?? data.gateway ?? "");
-      sifaloAmount = String(data.amount ?? "");
-
-      // Sifalo: 601 = success
-      verified =
-        code === "601" ||
-        ["success", "paid", "completed", "active"].some((s) =>
-          status.includes(s),
-        );
     } catch (e) {
-      console.error("[sifalo-verify] API error:", e);
-      verified = false;
-    }
-
-    if (!verified) {
+      console.error("[sifalo-verify] Sifalo API unreachable:", e);
       return json({
         ok: false,
-        error: "Payment not confirmed yet. If you've completed payment, please wait a moment and try again.",
-        code: sifaloCode || "602",
-        status: sifaloStatus || "pending",
-        payment_type: sifaloPaymentType,
-        amount: sifaloAmount,
-        sid: sid || orderId,
+        error: "Payment verification service is currently unreachable.",
+      }, 502);
+    }
+
+    // Per docs: response contains { sid, account, payment_type, amount, status, code }
+    const code = Number(sifaloData.code ?? 0);
+    const status = String(sifaloData.status ?? "").toLowerCase();
+    const sifaloSid = String(sifaloData.sid ?? "");
+    const paymentType = String(sifaloData.payment_type ?? "");
+    const amount = String(sifaloData.amount ?? "");
+
+    // Per docs: code 601 = success, status "success"
+    verified = code === 601 || status === "success";
+
+    if (!verified) {
+      // Update subscription with failed status if explicitly failed
+      if (status === "failure") {
+        await adminClient
+          .from("subscriptions")
+          .update({
+            status: "failed",
+            sid: sifaloSid || sidParam || undefined,
+            payment_type: paymentType || undefined,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", sub.id);
+      }
+
+      return json({
+        ok: false,
+        error: status === "failure"
+          ? "Payment was declined or failed. Please try again."
+          : "Payment not confirmed yet. If you've completed payment, please wait a moment and try again.",
+        code: code || 602,
+        status: status || "pending",
+        payment_type: paymentType,
+        amount,
+        sid: sifaloSid || sidParam || orderIdParam,
       });
     }
 
-    // Activate subscription
+    // Payment verified — activate subscription
     const cycle = sub.billing_cycle === "yearly" ? "yearly" : "monthly";
     const expire = new Date(
       Date.now() + (cycle === "yearly" ? 365 : 30) * 86400_000,
@@ -177,13 +177,16 @@ Deno.serve(async (req) => {
       .from("subscriptions")
       .update({
         status: "active",
+        sid: sifaloSid || sidParam || undefined,
+        payment_type: paymentType || undefined,
         start_date: new Date().toISOString(),
         expire_date: expire,
+        updated_at: new Date().toISOString(),
       })
       .eq("id", sub.id);
     if (subErr) console.error("[sifalo-verify] sub update error:", subErr);
 
-    // Update profile plan
+    // Upgrade profile plan
     const { error: profileErr } = await adminClient
       .from("profiles")
       .update({
@@ -194,25 +197,23 @@ Deno.serve(async (req) => {
     if (profileErr)
       console.error("[sifalo-verify] profile update error:", profileErr);
 
-    console.log("[sifalo-verify] activated", { userId, plan: sub.plan });
+    console.log("[sifalo-verify] activated", { userId, plan: sub.plan, sid: sifaloSid });
 
     return json({
       ok: true,
       plan: sub.plan,
       expire_date: expire,
-      code: sifaloCode || "601",
-      status: sifaloStatus || "success",
-      payment_type: sifaloPaymentType,
-      amount: sifaloAmount,
-      sid: sub.sid || sid || orderId,
+      code: code || 601,
+      status: "success",
+      payment_type: paymentType,
+      amount,
+      sid: sifaloSid || sidParam || orderIdParam,
     });
   } catch (outerErr: any) {
     console.error("[sifalo-verify] fatal error:", outerErr);
     return json({
       ok: false,
-      error:
-        outerErr?.message ||
-        "An unexpected error occurred during verification.",
-    });
+      error: outerErr?.message || "An unexpected error occurred during verification.",
+    }, 500);
   }
 });

@@ -210,8 +210,9 @@ export default function Pricing() {
                 ) : (
                   <UpgradeButton
                     planName={p.name}
+                    planId={p.id}
+                    billingCycle={yearly ? "yearly" : "monthly"}
                     className="w-full"
-                    onUpgrade={() => handleUpgrade(p.id)}
                   />
                 )}
                 {isCurrent && waLink && (
