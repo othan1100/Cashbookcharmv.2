@@ -47,6 +47,7 @@ export default function Checkout() {
   const navigate = useNavigate();
   const planId = (searchParams.get("plan") ?? "pro").toLowerCase();
   const cycle = searchParams.get("cycle") === "monthly" ? "monthly" : "yearly";
+  const auto = searchParams.get("auto") === "1";
 
   const [plan, setPlan] = useState<DbPlan | null>(null);
   const [loadingPlan, setLoadingPlan] = useState(true);
@@ -79,6 +80,14 @@ export default function Checkout() {
       }
     })();
   }, [planId, cycle]);
+
+  // Auto-open the Sifalo gateway as soon as the plan is loaded — no form required.
+  useEffect(() => {
+    if (!auto || loadingPlan || !plan || phase !== "form") return;
+    // fire-and-forget the submit handler
+    handleSubmit({ preventDefault: () => {} } as unknown as React.FormEvent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, loadingPlan, plan, phase]);
 
   const price = plan ? (cycle === "yearly" ? plan.yearly_price : plan.monthly_price) : 0;
 

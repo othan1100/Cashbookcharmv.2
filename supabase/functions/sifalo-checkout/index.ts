@@ -9,12 +9,13 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const ANON = Deno.env.get("SUPABASE_ANON_KEY") || "";
-const SIFALO_API_KEY = Deno.env.get("SIFALO_API_KEY") || "";
+const SIFALO_API_KEY =
+  Deno.env.get("SIFALO_API_KEY") || "sp_eseozkdj79qyh8gwrhjajpu40";
 const SIFALO_API_USERNAME =
   Deno.env.get("SIFALO_API_USERNAME") ||
   Deno.env.get("SIFALO_USERNAME") ||
   Deno.env.get("API Username") ||
-  "";
+  "su_da4zg62b";
 
 const SIFALO_GATEWAY_URL = "https://api.sifalopay.com/gateway/";
 const SIFALO_CHECKOUT_URL = "https://pay.sifalo.com/checkout/";

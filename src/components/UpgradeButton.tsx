@@ -25,10 +25,13 @@ export function UpgradeButton({
     if (loading) return;
     setLoading(true);
     toast({
-      title: "Redirecting to checkout",
-      description: `Preparing secure Sifalo Pay checkout for the ${planName} plan...`,
+      title: "Opening secure checkout",
+      description: `Connecting to Sifalo Pay gateway for the ${planName} plan...`,
     });
-    navigate(`/checkout?plan=${planId}&cycle=${billingCycle}`);
+    // Auto-opens the Sifalo gateway checkout — the Checkout page
+    // immediately calls the sifalo-checkout edge function and redirects
+    // to the gateway, no extra form required.
+    navigate(`/checkout?plan=${planId}&cycle=${billingCycle}&auto=1`);
   };
 
   return (
@@ -56,7 +59,7 @@ export function UpgradeButton({
           <>
             <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
             <span className="bg-gradient-to-r from-slate-100 to-slate-300 bg-clip-text text-transparent">
-              Preparing Secure Checkout...
+              Opening Sifalo Gateway...
             </span>
           </>
         ) : (
