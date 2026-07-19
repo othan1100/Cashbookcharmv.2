@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Loader2, Check, XCircle, ArrowRight, ShieldCheck, BadgeCheck, ReceiptText } from "lucide-react";
+import { Loader2, Check, XCircle, ArrowRight, ShieldCheck, BadgeCheck, ReceiptText, RotateCcw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/SectionCard";
@@ -22,6 +22,12 @@ export default function PaymentSuccess() {
   const [activePlan, setActivePlan] = useState("");
   const [txnDetails, setTxnDetails] = useState<TransactionDetails | null>(null);
 
+  const [retryCount, setRetryCount] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+  const [manualRetrying, setManualRetrying] = useState(false);
+  const MAX_RETRIES = 4;
+  const RETRY_DELAY_MS = 3000;
+
   useEffect(() => {
     // Sifalo can return reference inside sid, order_id, or id
     const sid = params.get("sid") ?? params.get("id") ?? "";
@@ -39,8 +45,10 @@ export default function PaymentSuccess() {
     }
 
     let isMounted = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const verifyTransaction = async () => {
+    const verifyTransaction = async (attempt: number) => {
+      if (attempt > 0) setRetrying(true);
       try {
         const { data, error } = await supabase.functions.invoke("sifalo-verify", {
           body: {
@@ -51,8 +59,27 @@ export default function PaymentSuccess() {
 
         if (!isMounted) return;
 
+        // If the gateway says the payment was cancelled, send the user to the
+        // cancellation page for a clear message.
+        if (data?.cancelled) {
+          navigate("/payment-cancelled?order_id=" + encodeURIComponent(orderId || sid), {
+            replace: true,
+          });
+          return;
+        }
+
         if (error || !data?.ok) {
+          // If still pending and we have retries left, poll again after a delay
+          const isPending = !data?.cancelled && data?.status !== "failed" && data?.status !== "failure";
+          if (isPending && attempt < MAX_RETRIES) {
+            setRetryCount(attempt + 1);
+            setRetrying(true);
+            timer = setTimeout(() => verifyTransaction(attempt + 1), RETRY_DELAY_MS);
+            return;
+          }
+
           setState("error");
+          setRetrying(false);
           const errorMsg = data?.error ?? error?.message ?? "Payment verification failed or timed out.";
           setMessage(errorMsg);
 
@@ -74,6 +101,7 @@ export default function PaymentSuccess() {
         }
 
         setState("ok");
+        setRetrying(false);
         const planName = String(data.plan || "Pro").toUpperCase();
         setActivePlan(planName);
         setMessage(`Your account has been successfully upgraded to the ${planName} plan.`);
@@ -93,6 +121,16 @@ export default function PaymentSuccess() {
         });
       } catch (err: any) {
         if (!isMounted) return;
+        setRetrying(false);
+
+        // Network errors: retry if attempts remain
+        if (attempt < MAX_RETRIES) {
+          setRetryCount(attempt + 1);
+          setRetrying(true);
+          timer = setTimeout(() => verifyTransaction(attempt + 1), RETRY_DELAY_MS);
+          return;
+        }
+
         setState("error");
         const errMsg = err.message || "An unexpected error occurred during verification.";
         setMessage(errMsg);
@@ -112,16 +150,89 @@ export default function PaymentSuccess() {
       }
     };
 
-    verifyTransaction();
+    verifyTransaction(0);
 
     return () => {
       isMounted = false;
+      if (timer) clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
   const handleGoToDashboard = () => {
     // Force page refresh to make sure plan state hook updates cleanly
     window.location.href = "/";
+  };
+
+  // Manual "Check Again" — lets the user re-query Sifalo for the latest
+  // payment/subscription state without relying on webhooks.
+  const handleManualRetry = async () => {
+    const sid = params.get("sid") ?? params.get("id") ?? "";
+    const orderId = params.get("order_id") ?? "";
+    if (!sid && !orderId) return;
+
+    setManualRetrying(true);
+    setState("loading");
+    setRetrying(false);
+    setRetryCount(0);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("sifalo-verify", {
+        body: { sid: sid || undefined, order_id: orderId || undefined },
+      });
+
+      if (data?.cancelled) {
+        navigate("/payment-cancelled?order_id=" + encodeURIComponent(orderId || sid), {
+          replace: true,
+        });
+        return;
+      }
+
+      if (error || !data?.ok) {
+        setState("error");
+        const errorMsg = data?.error ?? error?.message ?? "Payment still not confirmed.";
+        setMessage(errorMsg);
+        setTxnDetails({
+          code: data?.code || "602",
+          status: data?.status || "pending",
+          paymentType: data?.payment_type || "Sifalo Pay",
+          amount: data?.amount,
+          sid: data?.sid || sid || orderId,
+        });
+        toast({
+          title: "Still Pending",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setState("ok");
+      const planName = String(data.plan || "Pro").toUpperCase();
+      setActivePlan(planName);
+      setMessage(`Your account has been successfully upgraded to the ${planName} plan.`);
+      setTxnDetails({
+        code: data.code || "601",
+        status: data.status || "success",
+        paymentType: data.payment_type || "Sifalo Pay",
+        amount: data.amount,
+        sid: data.sid || sid || orderId,
+      });
+      toast({
+        title: "Payment Completed",
+        description: `Transaction verified! ${planName} unlocked.`,
+      });
+    } catch (err: any) {
+      setState("error");
+      setMessage(err?.message || "Could not reach the verification service.");
+      toast({
+        title: "Verification Error",
+        description: err?.message || "Network error.",
+        variant: "destructive",
+      });
+    } finally {
+      setManualRetrying(false);
+    }
   };
 
   return (
@@ -142,9 +253,13 @@ export default function PaymentSuccess() {
           {state === "loading" && (
             <div className="flex flex-col items-center py-6 text-center space-y-4">
               <Loader2 className="h-12 w-12 animate-spin text-[#163BB4]" />
-              <h1 className="text-xl font-extrabold text-slate-800">Verifying Payment...</h1>
+              <h1 className="text-xl font-extrabold text-slate-800">
+                {retrying ? "Re-checking Payment Status..." : "Verifying Payment..."}
+              </h1>
               <p className="text-xs text-slate-500 leading-relaxed max-w-xs">
-                We are securing confirmation of your transaction from Sifalo Pay. This should only take a few seconds.
+                {retrying
+                  ? `Payment not confirmed yet. Retrying (${retryCount}/${MAX_RETRIES})... We'll keep checking for a few seconds.`
+                  : "We are securing confirmation of your transaction from Sifalo Pay. This should only take a few seconds."}
               </p>
             </div>
           )}
@@ -278,6 +393,19 @@ export default function PaymentSuccess() {
               )}
 
               <div className="flex flex-col sm:flex-row gap-3 w-full pt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 rounded-xl h-11 text-xs font-bold border-slate-200 hover:bg-slate-50 text-slate-600 gap-2"
+                  onClick={handleManualRetry}
+                  disabled={manualRetrying}
+                >
+                  {manualRetrying ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" />
+                  )}
+                  Check Again
+                </Button>
                 <Button
                   variant="outline"
                   className="flex-1 rounded-xl h-11 text-xs font-bold border-slate-200 hover:bg-slate-50 text-slate-600"

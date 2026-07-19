@@ -10,6 +10,11 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const ANON = Deno.env.get("SUPABASE_ANON_KEY") || "";
 const SIFALO_API_KEY = Deno.env.get("SIFALO_API_KEY") || "";
+const SIFALO_API_USERNAME =
+  Deno.env.get("SIFALO_API_USERNAME") ||
+  Deno.env.get("SIFALO_USERNAME") ||
+  Deno.env.get("API Username") ||
+  "";
 
 const SIFALO_VERIFY_URL = "https://api.sifalopay.com/gateway/verify.php";
 
@@ -18,6 +23,14 @@ const json = (b: Record<string, unknown>, status = 200) =>
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+
+// Sifalo uses HTTP Basic auth with username:apikey (base64-encoded).
+function basicAuthHeader(): string {
+  const raw = SIFALO_API_USERNAME
+    ? `${SIFALO_API_USERNAME}:${SIFALO_API_KEY}`
+    : SIFALO_API_KEY;
+  return `Basic ${btoa(raw)}`;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS")
@@ -90,6 +103,21 @@ Deno.serve(async (req) => {
       });
     }
 
+    // If the subscription was explicitly cancelled by the user (cancel_url flow),
+    // don't keep polling Sifalo — return the cancelled state immediately.
+    if (sub.status === "cancelled") {
+      return json({
+        ok: false,
+        cancelled: true,
+        error: "Payment was cancelled. You can try again anytime.",
+        code: 610,
+        status: "cancelled",
+        sid: sub.sid || sidParam || orderIdParam,
+        amount: String(sub.amount ?? ""),
+        payment_type: sub.payment_type ?? "",
+      });
+    }
+
     // Call Sifalo verify API per docs:
     // POST https://api.sifalopay.com/gateway/verify.php
     // Body: { sid } — if no sid, use order_id
@@ -107,7 +135,7 @@ Deno.serve(async (req) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Basic ${SIFALO_API_KEY}`,
+          Authorization: basicAuthHeader(),
         },
         body: JSON.stringify(verifyBody),
       });
@@ -142,7 +170,7 @@ Deno.serve(async (req) => {
 
     if (!verified) {
       // Update subscription with failed status if explicitly failed
-      if (status === "failure") {
+      if (status === "failure" || status === "failed") {
         await adminClient
           .from("subscriptions")
           .update({
@@ -156,7 +184,7 @@ Deno.serve(async (req) => {
 
       return json({
         ok: false,
-        error: status === "failure"
+        error: status === "failure" || status === "failed"
           ? "Payment was declined or failed. Please try again."
           : "Payment not confirmed yet. If you've completed payment, please wait a moment and try again.",
         code: code || 602,
@@ -167,7 +195,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Payment verified — activate subscription
+    // Payment verified — activate subscription AND upgrade profile in one pass
     const cycle = sub.billing_cycle === "yearly" ? "yearly" : "monthly";
     const expire = new Date(
       Date.now() + (cycle === "yearly" ? 365 : 30) * 86400_000,

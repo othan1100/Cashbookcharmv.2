@@ -10,6 +10,11 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const ANON = Deno.env.get("SUPABASE_ANON_KEY") || "";
 const SIFALO_API_KEY = Deno.env.get("SIFALO_API_KEY") || "";
+const SIFALO_API_USERNAME =
+  Deno.env.get("SIFALO_API_USERNAME") ||
+  Deno.env.get("SIFALO_USERNAME") ||
+  Deno.env.get("API Username") ||
+  "";
 
 const SIFALO_GATEWAY_URL = "https://api.sifalopay.com/gateway/";
 const SIFALO_CHECKOUT_URL = "https://pay.sifalo.com/checkout/";
@@ -19,6 +24,14 @@ const json = (b: Record<string, unknown>, status = 200) =>
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+
+// Sifalo uses HTTP Basic auth with username:apikey (base64-encoded).
+function basicAuthHeader(): string {
+  const raw = SIFALO_API_USERNAME
+    ? `${SIFALO_API_USERNAME}:${SIFALO_API_KEY}`
+    : SIFALO_API_KEY;
+  return `Basic ${btoa(raw)}`;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS")
@@ -50,6 +63,7 @@ Deno.serve(async (req) => {
       plan?: string;
       billing_cycle?: "monthly" | "yearly";
       return_url?: string;
+      cancel_url?: string;
     };
     try {
       body = await req.json();
@@ -86,10 +100,11 @@ Deno.serve(async (req) => {
     // Generate a unique order_id
     const orderId = `cbc_${userId.slice(0, 8)}_${plan}_${cycle}_${Date.now()}`;
 
-    // Build return URL — Sifalo redirects here after payment with ?sid=...
+    // Build return + cancel URLs — Sifalo redirects here after payment with ?sid=...
     const appOrigin = req.headers.get("origin") || req.headers.get("referer") || "";
     const baseUrl = appOrigin ? new URL(appOrigin).origin : "https://cashbookcharm.com";
     const returnUrl = `${baseUrl}/payment-success?order_id=${orderId}`;
+    const cancelUrl = `${baseUrl}/payment-cancelled?order_id=${orderId}`;
 
     // Create pending subscription record
     const { data: inserted, error: insErr } = await adminClient
@@ -113,16 +128,17 @@ Deno.serve(async (req) => {
 
     // Call Sifalo Pay Checkout API per docs:
     // POST https://api.sifalopay.com/gateway/
-    // Body: { amount, gateway: "checkout", currency: "USD", return_url }
-    // Auth: Basic Auth with API key
+    // Body: { amount, gateway: "checkout", currency: "USD", return_url, cancel_url }
+    // Auth: Basic Auth with username:api_key
     const sifaloPayload = {
       amount: String(amount),
       gateway: "checkout",
       currency: "USD",
       return_url: returnUrl,
+      cancel_url: cancelUrl,
     };
 
-    console.log("[sifalo-checkout] request", { orderId, plan, cycle, amount, returnUrl });
+    console.log("[sifalo-checkout] request", { orderId, plan, cycle, amount, returnUrl, cancelUrl });
 
     let sifaloData: Record<string, unknown> = {};
     try {
@@ -130,7 +146,7 @@ Deno.serve(async (req) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Basic ${SIFALO_API_KEY}`,
+          Authorization: basicAuthHeader(),
         },
         body: JSON.stringify(sifaloPayload),
       });
